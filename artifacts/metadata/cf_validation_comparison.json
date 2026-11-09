@@ -1,0 +1,23 @@
+[
+  {
+    "Model":"Popularity Baseline",
+    "HitRate@12":6.24,
+    "Precision@12":0.552,
+    "Recall@12":2.109,
+    "MAP@12":0.575
+  },
+  {
+    "Model":"Item-Item Collaborative Filtering",
+    "HitRate@12":4.92,
+    "Precision@12":0.472,
+    "Recall@12":1.949,
+    "MAP@12":0.747
+  },
+  {
+    "Model":"Matrix Factorization (64 Factors)",
+    "HitRate@12":2.22,
+    "Precision@12":0.205,
+    "Recall@12":0.726,
+    "MAP@12":0.25
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "engine": "VisualRecommender",
+  "backbone": "MobileNetV2 (1280-d)",
+  "mean_latency_ms": 3.01,
+  "p95_latency_ms": 4.25
+}

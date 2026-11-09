@@ -1,0 +1,11 @@
+{
+  "engine": "ContentBasedRecommender",
+  "vectorizer": "TF-IDF (15,000 features, sublinear_tf)",
+  "catalog_size": 105542,
+  "mean_latency_ms": 22.47,
+  "p50_latency_ms": 21.23,
+  "p95_latency_ms": 26.97,
+  "p99_latency_ms": 38.13,
+  "product_group_consistency_pct": 99.0,
+  "product_type_consistency_pct": 91.2
+}

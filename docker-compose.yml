@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # Primary Relational Persistence
+  postgres:
+    image: postgres:15-alpine
+    container_name: fashion_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-fashion_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Distributed Cache & Rate Limiting Broker
+  redis:
+    image: redis:7-alpine
+    container_name: fashion_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Product Microservice
+  product_service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.product_service
+    container_name: fashion_product_service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Recommendation Microservice
+  recommendation_service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.rec_service
+    container_name: fashion_rec_service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # User & Interaction Microservice
+  user_service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.user_service
+    container_name: fashion_user_service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Asynchronous Background Worker
+  worker_service:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    container_name: fashion_worker_service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Central API Gateway
+  api_gateway:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.gateway
+    container_name: fashion_api_gateway
+    restart: always
+    environment:
+      PRODUCT_SERVICE_URL: http://product_service:8001
+      REC_SERVICE_URL: http://recommendation_service:8002
+      USER_SERVICE_URL: http://user_service:8003
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./h-and-m-personalized-fashion-recommendations/images:/app/h-and-m-personalized-fashion-recommendations/images:ro
+    depends_on:
+      - product_service
+      - recommendation_service
+      - user_service
+
+  # React + Vite Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.frontend
+    container_name: fashion_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api_gateway
+
+volumes:
+  postgres_data:
+  redis_data:

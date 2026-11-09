@@ -1,0 +1,12 @@
+# infrastructure/docker/Dockerfile.worker
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-services.txt .
+RUN pip install --no-cache-dir -r requirements-services.txt
+
+COPY backend/common /app/backend/common
+COPY backend/workers /app/backend/workers
+
+CMD ["python", "-m", "backend.workers.main"]

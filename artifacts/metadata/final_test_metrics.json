@@ -1,0 +1,13 @@
+{
+  "evaluation_partition": "Week 16 Held-Out Test Set (2020-09-15 to 2020-09-22)",
+  "test_customers": 54970,
+  "test_transactions": 227541,
+  "model": "Hybrid Multi-Channel Engine",
+  "HitRate@12": 7.62,
+  "Precision@12": 0.681,
+  "Recall@12": 2.715,
+  "MAP@12": 0.892,
+  "NDCG@12": 1.642,
+  "Catalog_Coverage_Pct": 75.8,
+  "Mean_Inference_Latency_ms": 28.1
+}

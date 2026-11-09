@@ -1,0 +1,17 @@
+{
+  "engine": "OutfitCompatibilityEngine",
+  "slots": [
+    "upper_body",
+    "lower_body",
+    "full_body",
+    "shoes",
+    "accessories"
+  ],
+  "weights": {
+    "color_harmony": 0.5,
+    "index_group_match": 0.3,
+    "basket_cooccur": 0.2
+  },
+  "mean_latency_ms": 0.99,
+  "p95_latency_ms": 1.49
+}

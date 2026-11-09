@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --aura-bg-primary: #F8F6F1;
+  --aura-bg-secondary: #EFECE4;
+  --aura-espresso: #28231F;
+  --aura-olive: #777B61;
+  --aura-taupe: #B9AE9E;
+  --aura-champagne: #D8C9B2;
+  --aura-muted: #817B72;
+  --aura-white: #FFFFFF;
+}
+
+@layer base {
+  body {
+    @apply antialiased bg-aura-ivory text-aura-espresso font-sans;
+    background-color: #F8F6F1;
+    color: #28231F;
+  }
+
+  h1, h2, h3, .font-editorial {
+    @apply font-serif;
+  }
+}
+
+/* Luxury Editorial Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #F8F6F1;
+}
+::-webkit-scrollbar-thumb {
+  background: #D8C9B2;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B9AE9E;
+}
+
+/* Subtle image smoothing */
+img {
+  image-rendering: -webkit-optimize-contrast;
+}

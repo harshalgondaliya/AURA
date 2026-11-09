@@ -1,0 +1,15 @@
+# infrastructure/docker/Dockerfile.rec_service
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-services.txt .
+RUN pip install --no-cache-dir -r requirements-services.txt
+
+COPY backend/common /app/backend/common
+COPY backend/services/recommendation_service /app/backend/services/recommendation_service
+COPY data/processed /app/data/processed
+COPY artifacts /app/artifacts
+
+EXPOSE 8002
+CMD ["uvicorn", "backend.services.recommendation_service.main:app", "--host", "0.0.0.0", "--port", "8002"]

@@ -1,0 +1,27 @@
+{
+  "engine": "HybridFashionRecommender",
+  "warm_user_weights": {
+    "cf": 0.4,
+    "vis": 0.3,
+    "text": 0.2,
+    "pop": 0.1
+  },
+  "warm_user_no_query_weights": {
+    "cf": 0.7,
+    "vis": 0.0,
+    "text": 0.0,
+    "pop": 0.3
+  },
+  "cold_start_weights": {
+    "cf": 0.0,
+    "vis": 0.5,
+    "text": 0.35,
+    "pop": 0.15
+  },
+  "pure_cold_weights": {
+    "cf": 0.0,
+    "vis": 0.0,
+    "text": 0.0,
+    "pop": 1.0
+  }
+}

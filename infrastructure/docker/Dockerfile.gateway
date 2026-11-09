@@ -1,0 +1,14 @@
+# infrastructure/docker/Dockerfile.gateway
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-services.txt .
+RUN pip install --no-cache-dir -r requirements-services.txt
+
+COPY backend/common /app/backend/common
+COPY backend/workers /app/backend/workers
+COPY backend/gateway /app/backend/gateway
+
+EXPOSE 8000
+CMD ["uvicorn", "backend.gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]

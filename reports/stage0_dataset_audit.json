@@ -1,0 +1,236 @@
+{
+  "generated_at": "2026-11-08 15:13:34",
+  "myntra": {
+    "total_records": 526564,
+    "total_columns": 13,
+    "unique_product_ids": 526564,
+    "duplicate_product_ids": 0,
+    "columns": [
+      "URL",
+      "Product_id",
+      "BrandName",
+      "Category",
+      "Individual_category",
+      "category_by_Gender",
+      "Description",
+      "DiscountPrice (in Rs)",
+      "OriginalPrice (in Rs)",
+      "DiscountOffer",
+      "SizeOption",
+      "Ratings",
+      "Reviews"
+    ],
+    "null_counts": {
+      "URL": 0,
+      "Product_id": 0,
+      "BrandName": 0,
+      "Category": 0,
+      "Individual_category": 0,
+      "category_by_Gender": 0,
+      "Description": 0,
+      "DiscountPrice (in Rs)": 193158,
+      "OriginalPrice (in Rs)": 0,
+      "DiscountOffer": 74306,
+      "SizeOption": 0,
+      "Ratings": 336152,
+      "Reviews": 336152
+    },
+    "null_percentages": {
+      "URL": 0.0,
+      "Product_id": 0.0,
+      "BrandName": 0.0,
+      "Category": 0.0,
+      "Individual_category": 0.0,
+      "category_by_Gender": 0.0,
+      "Description": 0.0,
+      "DiscountPrice (in Rs)": 36.68,
+      "OriginalPrice (in Rs)": 0.0,
+      "DiscountOffer": 14.11,
+      "SizeOption": 0.0,
+      "Ratings": 63.84,
+      "Reviews": 63.84
+    },
+    "top_brands": {
+      "Pothys": 16005,
+      "Roadster": 10935,
+      "KALINI": 9589,
+      "HERE&NOW": 6515,
+      "HRX by Hrithik Roshan": 5297,
+      "Mast & Harbour": 5148,
+      "Ethnic basket": 4790,
+      "Mitera": 4695,
+      "Puma": 4679,
+      "max": 4650
+    },
+    "top_categories": {
+      "Indian Wear": 145845,
+      "Western": 140992,
+      "Topwear": 74537,
+      "Bottom Wear": 55439,
+      "Lingerie & Sleep Wear": 55258,
+      "Sports Wear": 20627,
+      "Inner Wear &  Sleep Wear": 20370,
+      "Plus Size": 13496
+    },
+    "gender_categories": {
+      "Women": 339185,
+      "Men": 187379
+    },
+    "price_summary": {
+      "original_price_mean": 2414.07,
+      "original_price_median": 1999.0,
+      "discount_price_mean": 1237.44,
+      "discount_price_median": 952.0
+    }
+  },
+  "hm_articles": {
+    "total_articles": 105542,
+    "total_columns": 25,
+    "unique_articles": 105542,
+    "total_images_on_disk": 105102,
+    "matched_article_images": 105100,
+    "image_coverage_pct": 99.58,
+    "missing_images": 442,
+    "top_product_types": {
+      "Trousers": 11169,
+      "Dress": 10362,
+      "Sweater": 9302,
+      "T-shirt": 7904,
+      "Top": 4155,
+      "Blouse": 3979,
+      "Jacket": 3940,
+      "Shorts": 3939,
+      "Shirt": 3405,
+      "Vest top": 2991
+    },
+    "top_product_groups": {
+      "Garment Upper body": 42741,
+      "Garment Lower body": 19812,
+      "Garment Full body": 13292,
+      "Accessories": 11158,
+      "Underwear": 5490,
+      "Shoes": 5283,
+      "Swimwear": 3127,
+      "Socks & Tights": 2442,
+      "Nightwear": 1899,
+      "Unknown": 121,
+      "Underwear/nightwear": 54,
+      "Cosmetic": 49,
+      "Bags": 25,
+      "Items": 17,
+      "Furniture": 13,
+      "Garment and Shoe care": 9,
+      "Stationery": 5,
+      "Interior textile": 3,
+      "Fun": 2
+    },
+    "top_colour_groups": {
+      "Black": 22670,
+      "Dark Blue": 12171,
+      "White": 9542,
+      "Light Pink": 5811,
+      "Grey": 4487,
+      "Light Beige": 3356,
+      "Blue": 3308,
+      "Red": 3056,
+      "Light Blue": 3012,
+      "Greenish Khaki": 2767
+    },
+    "index_groups": {
+      "Ladieswear": 39737,
+      "Baby/Children": 34711,
+      "Divided": 15149,
+      "Menswear": 12553,
+      "Sport": 3392
+    },
+    "null_counts": {
+      "detail_desc": 416
+    }
+  },
+  "hm_customers": {
+    "total_customers": 1371980,
+    "unique_customers": 1371980,
+    "age_mean": 36.39,
+    "age_median": 32.0,
+    "null_age": 15861,
+    "club_member_status": {
+      "ACTIVE": 1272491,
+      "PRE-CREATE": 92960,
+      "NaN": 6062,
+      "LEFT CLUB": 467
+    }
+  },
+  "transactions_summary": {
+    "total_transactions": 31788324,
+    "min_date": "2018-09-20",
+    "max_date": "2020-09-22",
+    "12_week_start": "2020-06-30",
+    "16_week_start": "2020-06-02"
+  },
+  "sampling_comparisons": {
+    "12_weeks": {
+      "min_interactions_1": {
+        "users": 494132,
+        "items": 40998,
+        "interactions": 3448116,
+        "interaction_density_pct": 0.01702,
+        "sparsity_pct": 99.983,
+        "memory_mb": 382.69,
+        "avg_interactions_per_user": 6.98,
+        "avg_interactions_per_item": 84.1
+      },
+      "min_interactions_3": {
+        "users": 349667,
+        "items": 40488,
+        "interactions": 3228485,
+        "interaction_density_pct": 0.0228,
+        "sparsity_pct": 99.9772,
+        "memory_mb": 382.94,
+        "avg_interactions_per_user": 9.23,
+        "avg_interactions_per_item": 79.74
+      },
+      "min_interactions_5": {
+        "users": 241037,
+        "items": 39624,
+        "interactions": 2853588,
+        "interaction_density_pct": 0.02988,
+        "sparsity_pct": 99.9701,
+        "memory_mb": 338.47,
+        "avg_interactions_per_user": 11.84,
+        "avg_interactions_per_item": 72.02
+      }
+    },
+    "16_weeks": {
+      "min_interactions_1": {
+        "users": 596589,
+        "items": 45892,
+        "interactions": 5108386,
+        "interaction_density_pct": 0.01866,
+        "sparsity_pct": 99.9813,
+        "memory_mb": 565.2,
+        "avg_interactions_per_user": 8.56,
+        "avg_interactions_per_item": 111.31
+      },
+      "min_interactions_3": {
+        "users": 449587,
+        "items": 45577,
+        "interactions": 4883006,
+        "interaction_density_pct": 0.02383,
+        "sparsity_pct": 99.9762,
+        "memory_mb": 579.19,
+        "avg_interactions_per_user": 10.86,
+        "avg_interactions_per_item": 107.14
+      },
+      "min_interactions_5": {
+        "users": 331657,
+        "items": 44989,
+        "interactions": 4474691,
+        "interaction_density_pct": 0.02999,
+        "sparsity_pct": 99.97,
+        "memory_mb": 530.76,
+        "avg_interactions_per_user": 13.49,
+        "avg_interactions_per_item": 99.46
+      }
+    }
+  }
+}

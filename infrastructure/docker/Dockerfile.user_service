@@ -1,0 +1,13 @@
+# infrastructure/docker/Dockerfile.user_service
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements-services.txt .
+RUN pip install --no-cache-dir -r requirements-services.txt
+
+COPY backend/common /app/backend/common
+COPY backend/services/user_service /app/backend/services/user_service
+
+EXPOSE 8003
+CMD ["uvicorn", "backend.services.user_service.main:app", "--host", "0.0.0.0", "--port", "8003"]

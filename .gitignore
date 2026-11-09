@@ -1,0 +1,69 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# IDEs
+.vscode/
+.idea/
+
+# Large Datasets & Raw Images (Do not commit large raw datasets to Git)
+archive/
+h-and-m-personalized-fashion-recommendations/
+*.csv
+*.zip
+*.tar.gz
+data/raw/*
+!data/raw/README.md
+data/processed/*.parquet
+artifacts/models/*.npy
+artifacts/models/*.joblib
+artifacts/models/*.npz
+artifacts/embeddings/*.npy
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.db
+postgres_data/
+redis_data/
