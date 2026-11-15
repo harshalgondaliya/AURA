@@ -43,6 +43,29 @@ def health_check(db: Session = Depends(get_db)):
             details={"error": str(e)}
         )
 
+def format_product(p: Product) -> dict:
+    sizes_list = [s.strip() for s in p.sizes.split(",")] if p.sizes else []
+    return {
+        "article_id": p.article_id,
+        "prod_name": p.prod_name,
+        "product_type_name": p.product_type_name,
+        "product_group_name": p.product_group_name,
+        "standard_category": p.standard_category,
+        "colour_group_name": p.colour_group_name,
+        "perceived_colour_value_name": p.perceived_colour_value_name,
+        "gender": p.gender or "Unisex",
+        "sizes": sizes_list,
+        "size_type": p.size_type,
+        "size_system": p.size_system,
+        "availability_status": p.availability_status or ("supported_sizes" if sizes_list else "unavailable"),
+        "detail_desc": p.detail_desc,
+        "price_cents": p.price_cents or 2999,
+        "image_path": p.image_path,
+        "has_image": p.has_image,
+        "id": p.id,
+        "created_at": p.created_at,
+    }
+
 @app.get("/products", response_model=ProductListResponse)
 def get_products(
     page: int = Query(default=1, ge=1),
@@ -50,10 +73,12 @@ def get_products(
     category: Optional[str] = None,
     color: Optional[str] = None,
     gender: Optional[str] = None,
+    size: Optional[str] = None,
+    size_type: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    cache_key = f"products:p{page}:l{limit}:c{category}:col{color}:g{gender}:s{search}"
+    cache_key = f"products:p{page}:l{limit}:c{category}:col{color}:g{gender}:sz{size}:st{size_type}:s{search}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -76,6 +101,19 @@ def get_products(
         query = query.filter(Product.standard_category == category)
     if color:
         query = query.filter(Product.colour_group_name.ilike(f"%{color}%"))
+    if size:
+        # Exact token match inside comma-separated sizes string
+        s_clean = size.strip()
+        query = query.filter(
+            or_(
+                Product.sizes == s_clean,
+                Product.sizes.like(f"{s_clean},%"),
+                Product.sizes.like(f"%,{s_clean},%"),
+                Product.sizes.like(f"%,{s_clean}")
+            )
+        )
+    if size_type:
+        query = query.filter(Product.size_type == size_type)
     if search:
         search_filter = or_(
             Product.prod_name.ilike(f"%{search}%"),
@@ -91,7 +129,7 @@ def get_products(
         "total": total,
         "page": page,
         "limit": limit,
-        "items": [ProductResponse.from_orm(p).dict() for p in items]
+        "items": [format_product(p) for p in items]
     }
     cache.set_json(cache_key, resp, ttl_seconds=120)
     return resp
@@ -107,7 +145,7 @@ def get_product_detail(article_id: str, db: Session = Depends(get_db)):
     if not product:
         raise HTTPException(status_code=404, detail=f"Product '{article_id}' not found.")
         
-    resp = ProductResponse.from_orm(product).dict()
+    resp = format_product(product)
     cache.set_json(cache_key, resp, ttl_seconds=600)
     return resp
 
@@ -138,4 +176,48 @@ def get_categories(
     categories = [{"category": r[0], "count": r[1]} for r in results]
     cache.set_json(cache_key, categories, ttl_seconds=3600)
     return categories
-    return categories
+
+@app.get("/sizes")
+def get_available_sizes(
+    category: Optional[str] = None,
+    gender: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    cache_key = f"sizes:c{category}:g{gender}"
+    cached = cache.get_json(cache_key)
+    if cached:
+        return cached
+
+    query = db.query(Product.sizes, Product.size_type, Product.size_system).filter(
+        Product.is_active == True,
+        Product.sizes != None
+    )
+    if category:
+        query = query.filter(Product.standard_category == category)
+    if gender:
+        g_lower = gender.lower().strip()
+        if g_lower == "men":
+            query = query.filter(Product.gender.in_(["Men", "Unisex"]))
+        elif g_lower == "women":
+            query = query.filter(Product.gender.in_(["Women", "Unisex"]))
+        elif g_lower == "kids":
+            query = query.filter(Product.gender == "Kids")
+        elif g_lower == "unisex":
+            query = query.filter(Product.gender == "Unisex")
+
+    rows = query.distinct().all()
+    seen = set()
+    size_list = []
+    for r in rows:
+        if r[0]:
+            for s in r[0].split(","):
+                clean = s.strip()
+                if clean and clean not in seen:
+                    seen.add(clean)
+                    size_list.append({
+                        "size": clean,
+                        "size_type": r[1],
+                        "size_system": r[2]
+                    })
+    cache.set_json(cache_key, size_list, ttl_seconds=3600)
+    return size_list

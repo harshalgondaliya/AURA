@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS products (
     index_name VARCHAR(64),
     section_name VARCHAR(64),
     gender VARCHAR(32) DEFAULT 'Unisex',
+    sizes VARCHAR(255), -- Comma-separated sizes e.g. "XS,S,M,L,XL", "28,30,32,34,36", "UK 6,UK 7,UK 8"
+    size_type VARCHAR(32), -- alpha, waist, footwear_uk, onesize, age
+    size_system VARCHAR(32), -- Standard, Waist (in), UK, Universal
+    availability_status VARCHAR(32) DEFAULT 'supported_sizes',
     detail_desc TEXT,
     price_cents INTEGER DEFAULT 2999, -- integer representation of currency (e.g. $29.99 or Rs 2999)
     image_path VARCHAR(255),
@@ -55,6 +59,7 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE INDEX IF NOT EXISTS idx_products_article_id ON products(article_id);
 CREATE INDEX IF NOT EXISTS idx_products_gender ON products(gender);
+CREATE INDEX IF NOT EXISTS idx_products_size_type ON products(size_type);
 CREATE INDEX IF NOT EXISTS idx_products_standard_category ON products(standard_category);
 CREATE INDEX IF NOT EXISTS idx_products_colour ON products(colour_group_name);
 CREATE INDEX IF NOT EXISTS idx_products_active_has_image ON products(is_active, has_image);
@@ -93,6 +98,7 @@ CREATE TABLE IF NOT EXISTS outfit_items (
     outfit_id VARCHAR(64) NOT NULL REFERENCES saved_outfits(outfit_id) ON DELETE CASCADE,
     article_id VARCHAR(16) NOT NULL REFERENCES products(article_id),
     slot VARCHAR(32) NOT NULL, -- anchor, upper_body, lower_body, shoes, accessories
+    selected_size VARCHAR(32),
     item_score REAL DEFAULT 1.0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(outfit_id, slot)

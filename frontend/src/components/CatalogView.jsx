@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, SlidersHorizontal, ChevronLeft, ChevronRight, X, Sparkles } from 'lucide-react';
+import { Search, Filter, SlidersHorizontal, ChevronLeft, ChevronRight, X, Sparkles, Ruler } from 'lucide-react';
 import { fetchProducts } from '../services/api';
 import ProductCard from './ProductCard';
 
@@ -22,6 +22,7 @@ export default function CatalogView({
   const [color, setColor] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [selectedSize, setSelectedSize] = useState('');
   const [gender, setGender] = useState(() => {
     return initialGender || localStorage.getItem('aura_catalog_gender') || 'all';
   });
@@ -30,6 +31,7 @@ export default function CatalogView({
   useEffect(() => {
     if (initialCategory !== undefined && initialCategory !== category) {
       setCategory(initialCategory);
+      setSelectedSize('');
       setPage(1);
     }
   }, [initialCategory]);
@@ -38,6 +40,7 @@ export default function CatalogView({
   useEffect(() => {
     if (initialGender && initialGender !== gender) {
       setGender(initialGender);
+      setSelectedSize('');
       setPage(1);
     }
   }, [initialGender]);
@@ -61,14 +64,31 @@ export default function CatalogView({
     { label: 'Red', value: 'Red' },
   ];
 
+  const getCategorySizeOptions = (cat) => {
+    switch (cat) {
+      case 'upper_body':
+        return ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+      case 'lower_body':
+        return ['28', '30', '32', '34', '36', '38'];
+      case 'full_body':
+        return ['XS', 'S', 'M', 'L', 'XL'];
+      case 'shoes':
+        return ['UK 4', 'UK 5', 'UK 6', 'UK 7', 'UK 8', 'UK 9', 'UK 10', 'UK 11'];
+      case 'accessories':
+        return ['One Size'];
+      default:
+        return ['XS', 'S', 'M', 'L', 'XL', '30', '32', '34', 'UK 8', 'UK 9', 'One Size'];
+    }
+  };
+
   useEffect(() => {
     loadCatalog();
-  }, [page, category, color, search, gender]);
+  }, [page, category, color, search, gender, selectedSize]);
 
   const loadCatalog = async () => {
     setLoading(true);
     try {
-      const res = await fetchProducts(page, limit, category, color, search, gender);
+      const res = await fetchProducts(page, limit, category, color, search, gender, selectedSize);
       setProducts(res.items || []);
       setTotalCount(res.total || 0);
     } catch (err) {
@@ -176,6 +196,7 @@ export default function CatalogView({
               onClick={() => {
                 setPage(1);
                 setCategory(cat.value);
+                setSelectedSize('');
               }}
               className={`px-3.5 py-1.5 rounded-full text-xs transition-all ${
                 category === cat.value
@@ -209,6 +230,53 @@ export default function CatalogView({
               {c.label}
             </button>
           ))}
+        </div>
+
+        {/* Category-Conditioned Size Filter Strip */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-aura-espresso/6">
+          <span className="text-[11px] font-mono uppercase tracking-widest text-aura-muted mr-2 flex items-center gap-1 font-medium">
+            <Ruler className="w-3.5 h-3.5 text-aura-olive" /> Sizing:
+          </span>
+          <button
+            onClick={() => {
+              setPage(1);
+              setSelectedSize('');
+            }}
+            className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all border ${
+              selectedSize === ''
+                ? 'bg-aura-espresso text-aura-ivory border-aura-espresso shadow-xs'
+                : 'bg-white text-aura-espresso/70 border-aura-espresso/15 hover:border-aura-espresso/40'
+            }`}
+          >
+            All Sizes
+          </button>
+          {getCategorySizeOptions(category).map((sz) => (
+            <button
+              key={sz}
+              onClick={() => {
+                setPage(1);
+                setSelectedSize(sz === selectedSize ? '' : sz);
+              }}
+              className={`px-3 py-1 rounded-full text-[11px] font-mono font-medium transition-all border ${
+                selectedSize === sz
+                  ? 'bg-aura-espresso text-aura-ivory border-aura-espresso shadow-xs'
+                  : 'bg-white text-aura-espresso/70 border-aura-espresso/15 hover:border-aura-espresso/40'
+              }`}
+            >
+              {sz}
+            </button>
+          ))}
+          {selectedSize && (
+            <button
+              onClick={() => {
+                setPage(1);
+                setSelectedSize('');
+              }}
+              className="text-[10px] font-mono text-aura-olive hover:underline ml-1 uppercase tracking-wider"
+            >
+              Reset Size
+            </button>
+          )}
         </div>
       </div>
 

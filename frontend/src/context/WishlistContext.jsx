@@ -88,24 +88,51 @@ export function WishlistProvider({ children, activeUser = 'user_000001', onToast
     [wishlistIds]
   );
 
-  // 3. Centralized Wishlist Toggle
+  // 3. Centralized Wishlist Toggle with Preferred Size Support
   const toggleWishlist = useCallback(
-    async (product, explicitNextState = null) => {
+    async (product, explicitNextState = null, selectedSize = null) => {
       if (!product || !product.article_id) return;
       const aid = String(product.article_id);
       const currentlyLiked = wishlistIds.has(aid);
       const shouldLike = explicitNextState !== null ? explicitNextState : !currentlyLiked;
+      const sizeToStore = selectedSize || product.selected_size;
+
+      // If already liked and user updates the chosen size
+      if (shouldLike && currentlyLiked && sizeToStore) {
+        setWishlistItems((prev) => {
+          const next = prev.map((p) =>
+            String(p.article_id) === aid ? { ...p, selected_size: sizeToStore } : p
+          );
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(next));
+          } catch (e) {
+            console.warn(e);
+          }
+          return next;
+        });
+        if (onToast) onToast(`Updated preferred size for "${product.prod_name || 'Item'}" to ${sizeToStore}.`, 'info');
+        return;
+      }
 
       if (shouldLike === currentlyLiked) return; // No change needed
 
       // Optimistic State Update
       if (shouldLike) {
+        const itemToStore = {
+          ...product,
+          selected_size: sizeToStore || product.selected_size,
+        };
+
         // Add to Wishlist
         setWishlistIds((prev) => new Set([...prev, aid]));
         setWishlistItems((prev) => {
           const exists = prev.some((p) => String(p.article_id) === aid);
-          if (exists) return prev;
-          const next = [product, ...prev];
+          if (exists) {
+            return prev.map((p) =>
+              String(p.article_id) === aid ? { ...p, selected_size: sizeToStore || p.selected_size } : p
+            );
+          }
+          const next = [itemToStore, ...prev];
           try {
             localStorage.setItem(storageKey, JSON.stringify(next));
           } catch (e) {

@@ -84,14 +84,35 @@ for slot in ["upper_body", "lower_body", "full_body", "shoes", "accessories"]:
     slot_candidates[(slot, "Men")] = slot_df[slot_df["normalized_gender"].isin(["Men", "Unisex"])]["article_id"].tolist()
     slot_candidates[(slot, "Women")] = slot_df[slot_df["normalized_gender"].isin(["Women", "Unisex"])]["article_id"].tolist()
 
+# Load catalog size metadata from PostgreSQL
+article_sizes = {}
+try:
+    from backend.common.database import SessionLocal
+    from backend.common.models import Product
+    with SessionLocal() as db:
+        prods = db.query(Product.article_id, Product.sizes, Product.size_type, Product.size_system, Product.availability_status).all()
+        for pr in prods:
+            s_list = [s.strip() for s in pr[1].split(",")] if pr[1] else []
+            article_sizes[pr[0]] = {
+                "sizes": s_list,
+                "size_type": pr[2],
+                "size_system": pr[3],
+                "availability_status": pr[4] or ("supported_sizes" if s_list else "unavailable")
+            }
+        print(f"[REC SERVICE] Loaded size metadata for {len(article_sizes):,} catalog products.")
+except Exception as e:
+    print(f"[REC SERVICE] Note: DB size load deferred/fallback: {e}")
+
 print("[REC SERVICE] ML Models, Indexes and Gender-Aware Slot Partitions Ready!")
 
 # --- Recommendation Helpers ---
-def format_item(aid: str, score: float = 1.0) -> dict:
+def format_item(aid: str, score: float = 1.0, selected_size: Optional[str] = None) -> dict:
     meta = article_meta.get(aid, {})
+    s_info = article_sizes.get(aid, {})
     img_path = meta.get("image_path", "")
     if pd.isna(img_path):
         img_path = ""
+    sizes_list = s_info.get("sizes", [])
     return {
         "article_id": str(aid),
         "prod_name": "Fashion Item" if pd.isna(meta.get("prod_name")) else str(meta.get("prod_name")),
@@ -100,6 +121,11 @@ def format_item(aid: str, score: float = 1.0) -> dict:
         "colour_group_name": "Multi" if pd.isna(meta.get("colour_group_name")) else str(meta.get("colour_group_name")),
         "standard_category": "other" if pd.isna(meta.get("standard_category")) else str(meta.get("standard_category")),
         "gender": str(meta.get("normalized_gender", "Unisex")),
+        "sizes": sizes_list,
+        "size_type": s_info.get("size_type"),
+        "size_system": s_info.get("size_system"),
+        "availability_status": s_info.get("availability_status") or ("supported_sizes" if sizes_list else "unavailable"),
+        "selected_size": selected_size or (sizes_list[0] if sizes_list else None),
         "price_cents": 2999,
         "image_path": str(img_path),
         "has_image": bool(meta.get("has_image", 1)),
@@ -151,10 +177,11 @@ def get_similar_items(
     top_k: int = Query(default=6, ge=1, le=24),
     mode: str = Query(default="hybrid", pattern="^(hybrid|visual|text)$"),
     filter_category: bool = Query(default=True),
-    gender: Optional[str] = Query(default=None)
+    gender: Optional[str] = Query(default=None),
+    size: Optional[str] = Query(default=None)
 ):
-    """Feature A: Recommend Similar Clothing Items with slot and gender integrity."""
-    cache_key = f"rec:similar:{article_id}:k{top_k}:m{mode}:fc{filter_category}:g{gender}"
+    """Feature A: Recommend Similar Clothing Items with slot, gender and size integrity."""
+    cache_key = f"rec:similar:{article_id}:k{top_k}:m{mode}:fc{filter_category}:g{gender}:sz{size}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -204,9 +231,17 @@ def get_similar_items(
             gender_mask = df_articles["normalized_gender"].isin(["Women", "Unisex"]).values
             scores = np.where(gender_mask, scores, scores - 15.0)
 
+    # 5. Size eligibility constraint
+    if size:
+        s_clean = size.strip()
+        for i, aid in enumerate(df_articles["article_id"]):
+            c_sizes = article_sizes.get(aid, {}).get("sizes", [])
+            if s_clean not in c_sizes:
+                scores[i] -= 10.0
+
     top_indices = np.argsort(scores)[::-1][:top_k]
     valid_indices = [i for i in top_indices if scores[i] > -5.0]
-    results = [format_item(idx2aid[i], float(scores[i])) for i in valid_indices]
+    results = [format_item(idx2aid[i], float(scores[i]), selected_size=size) for i in valid_indices]
     
     cache.set_json(cache_key, results, ttl_seconds=300)
     return results
@@ -235,8 +270,10 @@ def get_outfit_recommendations(
     exclude_ids = set(str(x) for x in payload.get("exclude_ids", []))
     exclude_ids.add(anchor_id)
     resynthesize_count = int(payload.get("resynthesize_count", 0))
+    size_preferences = payload.get("size_preferences", {})
 
-    cache_key = f"rec:outfit:{anchor_id}:g{target_gender}:r{resynthesize_count}"
+    size_cache_str = "_".join(f"{k}:{v}" for k, v in sorted(size_preferences.items())) if size_preferences else "none"
+    cache_key = f"rec:outfit:{anchor_id}:g{target_gender}:r{resynthesize_count}:sz{size_cache_str}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -261,8 +298,10 @@ def get_outfit_recommendations(
         if not candidates:
             candidates = slot_candidates.get((slot, "all"), popular_articles)
 
-        # 2. Score candidates by color harmony with anchor
+        # 2. Score candidates by color harmony with anchor & slot size constraints
         scored_candidates = []
+        pref_size = size_preferences.get(slot)
+
         for cid in candidates[:150]:
             if cid in chosen_aids_in_outfit or cid == anchor_id:
                 continue
@@ -273,6 +312,15 @@ def get_outfit_recommendations(
             base_score = color_harmony(anchor_color, cmeta.get("colour_group_name", "Black"))
             # Apply severe penalty if product was already displayed in recent session history
             adjusted_score = base_score - 0.40 if cid in exclude_ids else base_score
+
+            # Size-aware candidate ranking: prefer products documented with user's preferred size
+            if pref_size:
+                c_sizes = article_sizes.get(cid, {}).get("sizes", [])
+                if pref_size in c_sizes:
+                    adjusted_score += 0.20
+                else:
+                    adjusted_score -= 0.35
+
             scored_candidates.append((cid, adjusted_score, base_score))
 
         # Sort by adjusted compatibility score
@@ -297,6 +345,10 @@ def get_outfit_recommendations(
         total_harmony += final_score
 
         pmeta = article_meta.get(pick_cid, {})
+        s_info = article_sizes.get(pick_cid, {})
+        s_list = s_info.get("sizes", [])
+        chosen_size = pref_size or (s_list[0] if s_list else None)
+
         outfit_slots[slot] = OutfitSlotItem(
             article_id=pick_cid,
             slot=slot,
@@ -304,11 +356,20 @@ def get_outfit_recommendations(
             product_type_name=pmeta.get("product_type_name", "Garment"),
             colour_group_name=pmeta.get("colour_group_name", "Black"),
             gender=pmeta.get("normalized_gender", target_gender),
+            sizes=s_list,
+            size_type=s_info.get("size_type"),
+            size_system=s_info.get("size_system"),
+            selected_size=chosen_size,
+            availability_status=s_info.get("availability_status") or ("supported_sizes" if s_list else "unavailable"),
             image_path=pmeta.get("image_path", ""),
             compatibility_score=round(final_score, 2)
         )
 
     overall_score = round(total_harmony / len(needed_slots), 2) if needed_slots else 0.95
+
+    a_info = article_sizes.get(anchor_id, {})
+    a_sizes = a_info.get("sizes", [])
+    anchor_chosen_size = size_preferences.get("anchor") or (a_sizes[0] if a_sizes else None)
 
     response = OutfitResponse(
         anchor=OutfitSlotItem(
@@ -318,11 +379,17 @@ def get_outfit_recommendations(
             product_type_name=anchor_meta.get("product_type_name", "Garment"),
             colour_group_name=anchor_color,
             gender=anchor_gender,
+            sizes=a_sizes,
+            size_type=a_info.get("size_type"),
+            size_system=a_info.get("size_system"),
+            selected_size=anchor_chosen_size,
+            availability_status=a_info.get("availability_status") or ("supported_sizes" if a_sizes else "unavailable"),
             image_path=anchor_meta.get("image_path", ""),
             compatibility_score=1.0
         ),
         slots=outfit_slots,
-        overall_score=overall_score
+        overall_score=overall_score,
+        selected_sizes=size_preferences
     )
 
     cache.set_json(cache_key, response.dict(), ttl_seconds=300)
@@ -333,10 +400,11 @@ def get_personalized_recommendations(
     user_id: str,
     top_k: int = Query(default=10, ge=1, le=30),
     gender: Optional[str] = Query(default=None),
+    size: Optional[str] = Query(default=None),
     recent_views: Optional[str] = Query(default=None) # Comma-separated article_ids
 ):
-    """Features C & D: Continuous Personalization Feed with Gender Scope."""
-    cache_key = f"rec:user:{user_id}:k{top_k}:g{gender}:rv{recent_views}"
+    """Features C & D: Continuous Personalization Feed with Gender and Size Scope."""
+    cache_key = f"rec:user:{user_id}:k{top_k}:g{gender}:sz{size}:rv{recent_views}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -348,7 +416,7 @@ def get_personalized_recommendations(
     if recent_views:
         recent_aids = [a.strip() for a in recent_views.split(",") if a.strip() in article_meta]
         for aid in recent_aids[-3:]:
-            sim_items = get_similar_items(aid, top_k=4, mode="hybrid", filter_category=True, gender=gender)
+            sim_items = get_similar_items(aid, top_k=4, mode="hybrid", filter_category=True, gender=gender, size=size)
             for it in sim_items:
                 if it["article_id"] not in seen_aids and it["article_id"] != aid:
                     seen_aids.add(it["article_id"])
@@ -358,7 +426,7 @@ def get_personalized_recommendations(
             if len(results) >= top_k:
                 break
 
-    # Fill remainder with trending popular items matching gender
+    # Fill remainder with trending popular items matching gender & size
     if len(results) < top_k:
         for aid in popular_articles:
             if aid not in seen_aids and aid in article_meta:
@@ -370,8 +438,12 @@ def get_personalized_recommendations(
                         continue
                     elif g_lower == "women" and item_gender not in ("Women", "Unisex"):
                         continue
+                if size:
+                    c_sizes = article_sizes.get(aid, {}).get("sizes", [])
+                    if size.strip() not in c_sizes:
+                        continue
                 seen_aids.add(aid)
-                results.append(format_item(aid, 0.85))
+                results.append(format_item(aid, 0.85, selected_size=size))
             if len(results) >= top_k:
                 break
 

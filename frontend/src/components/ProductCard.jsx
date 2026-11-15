@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Sparkles, Layers, Heart } from 'lucide-react';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
 import { formatProductPrice } from '../utils/formatters';
+import { getCardSizeDisplay } from '../utils/sizeFormatters';
 import { useWishlist } from '../context/WishlistContext';
 
 export default function ProductCard({
@@ -144,6 +145,16 @@ export default function ProductCard({
               }}
             />
             <span className="truncate">{product.colour_group_name || 'Neutral'}</span>
+          </div>
+
+          {/* Compact Size Indicator */}
+          <div className="flex items-center justify-between text-[10px] font-mono text-aura-espresso/60 pt-0.5">
+            <span className="truncate">{getCardSizeDisplay(product)}</span>
+            {product.selected_size && (
+              <span className="font-semibold text-aura-olive bg-aura-cream px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider shrink-0 border border-aura-espresso/10">
+                Size {product.selected_size}
+              </span>
+            )}
           </div>
         </div>
 

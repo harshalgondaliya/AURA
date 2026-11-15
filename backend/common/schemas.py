@@ -17,6 +17,11 @@ class ProductBase(BaseModel):
     colour_group_name: str
     perceived_colour_value_name: Optional[str] = None
     gender: Optional[str] = "Unisex"
+    sizes: Optional[List[str]] = None
+    size_type: Optional[str] = None
+    size_system: Optional[str] = None
+    availability_status: Optional[str] = "supported_sizes"
+    selected_size: Optional[str] = None
     detail_desc: Optional[str] = None
     price_cents: int = 2999
     image_path: Optional[str] = None
@@ -43,6 +48,7 @@ class RecommendationRequest(BaseModel):
     article_id: Optional[str] = None
     top_k: int = Field(default=8, ge=1, le=50)
     category_filter: Optional[str] = None
+    size_filter: Optional[str] = None
 
 class OutfitSlotItem(BaseModel):
     article_id: str
@@ -51,6 +57,11 @@ class OutfitSlotItem(BaseModel):
     product_type_name: str
     colour_group_name: str
     gender: Optional[str] = "Unisex"
+    sizes: Optional[List[str]] = None
+    size_type: Optional[str] = None
+    size_system: Optional[str] = None
+    selected_size: Optional[str] = None
+    availability_status: Optional[str] = "supported_sizes"
     image_path: Optional[str] = None
     compatibility_score: float = 1.0
 
@@ -58,6 +69,7 @@ class OutfitResponse(BaseModel):
     anchor: OutfitSlotItem
     slots: Dict[str, OutfitSlotItem]
     overall_score: float = 0.95
+    selected_sizes: Optional[Dict[str, str]] = None
 
 
 # --- Interaction Schemas ---
@@ -85,6 +97,7 @@ class SaveOutfitRequest(BaseModel):
     outfit_name: str = "My Fashion Look"
     anchor_article_id: str
     item_article_ids: List[str] # List of items in outfit
+    selected_sizes: Optional[Dict[str, str]] = None # Optional mapping of article_id -> size
 
 class SavedOutfitResponse(BaseModel):
     outfit_id: str

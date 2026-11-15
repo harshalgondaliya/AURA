@@ -181,6 +181,10 @@ async def route_products_root(request: Request):
 async def route_categories(request: Request):
     return await forward_request(PRODUCT_SERVICE_URL, "/categories", request, breaker_product)
 
+@app.get("/api/sizes")
+async def route_sizes(request: Request):
+    return await forward_request(PRODUCT_SERVICE_URL, "/sizes", request, breaker_product)
+
 # --- Routing: Recommendation Service ---
 @app.api_route("/api/recommendations/{rest_of_path:path}", methods=["GET", "POST"])
 async def route_recommendations(rest_of_path: str, request: Request):

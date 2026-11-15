@@ -5,12 +5,14 @@
 
 const BASE_URL = '/api';
 
-export async function fetchProducts(page = 1, limit = 24, category = '', color = '', search = '', gender = '') {
+export async function fetchProducts(page = 1, limit = 24, category = '', color = '', search = '', gender = '', size = '', sizeType = '') {
   const params = new URLSearchParams({ page, limit });
   if (category) params.append('category', category);
   if (color) params.append('color', color);
   if (search) params.append('search', search);
   if (gender && gender !== 'all') params.append('gender', gender);
+  if (size && size !== 'all') params.append('size', size);
+  if (sizeType) params.append('size_type', sizeType);
 
   const res = await fetch(`${BASE_URL}/products?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch products: ${res.statusText}`);
@@ -41,32 +43,48 @@ export async function fetchCategories(gender = '') {
   }
 }
 
+export async function fetchAvailableSizes(category = '', gender = '') {
+  const params = new URLSearchParams();
+  if (category) params.append('category', category);
+  if (gender && gender !== 'all') params.append('gender', gender);
+  try {
+    const res = await fetch(`${BASE_URL}/sizes?${params.toString()}`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch available sizes:', err);
+    return [];
+  }
+}
+
 export async function fetchProductById(articleId) {
   const res = await fetch(`${BASE_URL}/products/${articleId}`);
   if (!res.ok) throw new Error(`Product not found: ${articleId}`);
   return res.json();
 }
 
-export async function fetchSimilarItems(articleId, topK = 6, mode = 'hybrid', filterCategory = true, gender = '') {
+export async function fetchSimilarItems(articleId, topK = 6, mode = 'hybrid', filterCategory = true, gender = '', size = '') {
   const params = new URLSearchParams({ 
     top_k: topK, 
     mode, 
     filter_category: filterCategory 
   });
   if (gender && gender !== 'all') params.append('gender', gender);
+  if (size && size !== 'all') params.append('size', size);
   const res = await fetch(`${BASE_URL}/recommendations/similar/${articleId}?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch similar items: ${res.statusText}`);
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 }
 
-export async function fetchOutfitRecommendations(anchorArticleId, gender = '', excludeIds = [], resynthesizeCount = 0) {
+export async function fetchOutfitRecommendations(anchorArticleId, gender = '', excludeIds = [], resynthesizeCount = 0, sizePreferences = null) {
   const payload = {
     anchor_article_id: anchorArticleId,
     resynthesize_count: resynthesizeCount,
   };
   if (gender && gender !== 'all') payload.gender = gender;
   if (Array.isArray(excludeIds) && excludeIds.length > 0) payload.exclude_ids = excludeIds;
+  if (sizePreferences && Object.keys(sizePreferences).length > 0) payload.size_preferences = sizePreferences;
 
   const res = await fetch(`${BASE_URL}/recommendations/outfits`, {
     method: 'POST',
@@ -77,13 +95,16 @@ export async function fetchOutfitRecommendations(anchorArticleId, gender = '', e
   return res.json();
 }
 
-export async function fetchPersonalizedFeed(userId, topK = 12, recentViews = [], gender = '') {
+export async function fetchPersonalizedFeed(userId, topK = 12, recentViews = [], gender = '', size = '') {
   const params = new URLSearchParams({ top_k: topK });
   if (recentViews.length > 0) {
     params.append('recent_views', recentViews.join(','));
   }
   if (gender && gender !== 'all') {
     params.append('gender', gender);
+  }
+  if (size && size !== 'all') {
+    params.append('size', size);
   }
   const res = await fetch(`${BASE_URL}/recommendations/personalized/${userId}?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch personalized feed: ${res.statusText}`);
@@ -145,16 +166,20 @@ export async function removeFavorite(userId, articleId) {
   }
 }
 
-export async function saveOutfit(userId, outfitName, anchorId, itemIds) {
+export async function saveOutfit(userId, outfitName, anchorId, itemIds, selectedSizes = null) {
+  const payload = {
+    user_id: userId,
+    outfit_name: outfitName,
+    anchor_article_id: anchorId,
+    item_article_ids: itemIds,
+  };
+  if (selectedSizes) {
+    payload.selected_sizes = selectedSizes;
+  }
   const res = await fetch(`${BASE_URL}/outfits/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user_id: userId,
-      outfit_name: outfitName,
-      anchor_article_id: anchorId,
-      item_article_ids: itemIds,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`Failed to save outfit`);
   return res.json();

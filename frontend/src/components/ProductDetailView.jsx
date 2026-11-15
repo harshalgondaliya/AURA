@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Sparkles, Layers, Heart, Share2, Check, ShieldCheck, Tag } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Sparkles, Layers, Heart, Share2, Check, ShieldCheck, Tag, Ruler, X } from 'lucide-react';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
 import { formatProductPrice } from '../utils/formatters';
+import { getSizeSystemLabel, SIZE_CHARTS } from '../utils/sizeFormatters';
 import { useWishlist } from '../context/WishlistContext';
 
 export default function ProductDetailView({
@@ -14,6 +15,17 @@ export default function ProductDetailView({
 }) {
   const [imageError, setImageError] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showSizeGuide, setShowSizeGuide] = useState(false);
+
+  const [selectedSize, setSelectedSize] = useState(() => {
+    return product?.selected_size || (Array.isArray(product?.sizes) && product.sizes.length > 0 ? product.sizes[0] : '');
+  });
+
+  useEffect(() => {
+    if (product) {
+      setSelectedSize(product.selected_size || (Array.isArray(product.sizes) && product.sizes.length > 0 ? product.sizes[0] : ''));
+    }
+  }, [product]);
 
   // Consume centralized WishlistContext with safe fallback
   let wishlistCtx = null;
@@ -28,11 +40,18 @@ export default function ProductDetailView({
     : isLiked;
 
   const handleWishlistToggle = () => {
+    const itemWithChoice = { ...product, selected_size: selectedSize };
     if (wishlistCtx) {
-      wishlistCtx.toggleWishlist(product);
+      wishlistCtx.toggleWishlist(itemWithChoice, undefined, selectedSize);
     }
     if (onLikeClick) {
-      onLikeClick(product, !isSaved);
+      onLikeClick(itemWithChoice, !isSaved);
+    }
+  };
+
+  const handleOutfitAction = () => {
+    if (onOutfitClick) {
+      onOutfitClick({ ...product, selected_size: selectedSize });
     }
   };
 
@@ -186,11 +205,88 @@ export default function ProductDetailView({
             </div>
           </div>
 
+          {/* Dedicated Size Selection Section */}
+          <div className="space-y-3">
+            {(!product.sizes || product.sizes.length === 0 || product.availability_status === 'unavailable') ? (
+              <div className="p-4 rounded-2xl bg-white border border-aura-espresso/10 space-y-1">
+                <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-aura-muted block font-medium">
+                  Sizing Metadata
+                </span>
+                <p className="text-xs font-serif font-medium text-aura-espresso">
+                  Size details unavailable
+                </p>
+                <p className="text-[11px] text-aura-muted font-normal leading-relaxed">
+                  Detailed sizing metadata is not documented for this archival garment. Please refer to standard proportions.
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 bg-white rounded-2xl border border-aura-espresso/8 shadow-aura-subtle space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-aura-muted font-medium">
+                      Select Size
+                    </span>
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-aura-olive bg-aura-cream px-2 py-0.5 rounded-full border border-aura-espresso/10">
+                      {getSizeSystemLabel(product.size_type, product.size_system)}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowSizeGuide(true)}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-mono text-aura-olive hover:text-aura-espresso transition-colors font-medium"
+                    title="View dimension specifications"
+                  >
+                    <Ruler className="w-3.5 h-3.5" />
+                    <span>Size Guide</span>
+                  </button>
+                </div>
+
+                {/* Size Pills */}
+                <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Available Garment Sizes">
+                  {product.sizes.map((sz) => {
+                    const isSelected = selectedSize === sz;
+                    return (
+                      <button
+                        key={sz}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        tabIndex={0}
+                        onClick={() => setSelectedSize(sz)}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            setSelectedSize(sz);
+                          }
+                        }}
+                        className={`min-w-[44px] h-10 px-3 rounded-xl text-xs font-mono font-medium tracking-wide transition-all border flex items-center justify-center cursor-pointer ${
+                          isSelected
+                            ? 'bg-aura-espresso text-aura-ivory border-aura-espresso shadow-xs scale-102'
+                            : 'bg-white text-aura-espresso border-aura-espresso/20 hover:border-aura-espresso/50 hover:bg-aura-ivory'
+                        }`}
+                      >
+                        {sz}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedSize && (
+                  <p className="text-[11px] font-mono text-aura-muted pt-1">
+                    Selected: <span className="font-semibold text-aura-espresso">{selectedSize}</span>
+                    {product.size_type === 'onesize' && ' (Universal Proportions)'}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Action CTAs */}
           <div className="space-y-3 pt-2">
             {/* Primary Action: Style Outfit */}
             <button
-              onClick={() => onOutfitClick && onOutfitClick(product)}
+              onClick={handleOutfitAction}
               className="w-full py-4 px-6 bg-aura-espresso hover:bg-aura-dark active:scale-[0.98] text-aura-ivory rounded-full text-xs font-medium uppercase tracking-[0.2em] transition-all shadow-aura-card flex items-center justify-center gap-2 group"
             >
               <Layers className="w-4 h-4 text-aura-champagne" />
@@ -223,6 +319,97 @@ export default function ProductDetailView({
           </div>
         </div>
       </div>
+
+      {/* Size Guide Modal */}
+      {showSizeGuide && (
+        <div
+          className="fixed inset-0 z-50 bg-aura-espresso/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setShowSizeGuide(false)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-xl w-full p-6 sm:p-8 border border-aura-espresso/15 shadow-2xl space-y-6 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-aura-espresso/10 pb-4">
+              <div className="space-y-1">
+                <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-aura-olive font-medium">
+                  Measurement Specifications
+                </span>
+                <h3 className="text-xl sm:text-2xl font-serif font-normal text-aura-espresso">
+                  {(() => {
+                    const isMen = product.index_group_name === 'Menswear' || product.gender === 'men';
+                    if (product.size_type === 'waist') return isMen ? SIZE_CHARTS.waist_men.title : SIZE_CHARTS.waist_women.title;
+                    if (product.size_type === 'footwear_uk') return isMen ? SIZE_CHARTS.shoes_men.title : SIZE_CHARTS.shoes_women.title;
+                    return isMen ? SIZE_CHARTS.alpha_men.title : SIZE_CHARTS.alpha_women.title;
+                  })()}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowSizeGuide(false)}
+                className="w-8 h-8 rounded-full bg-aura-cream hover:bg-aura-taupe/30 text-aura-espresso flex items-center justify-center transition-colors"
+                title="Close size guide"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Table Content */}
+            <div className="overflow-x-auto">
+              {(() => {
+                const isMen = product.index_group_name === 'Menswear' || product.gender === 'men';
+                let chart = isMen ? SIZE_CHARTS.alpha_men : SIZE_CHARTS.alpha_women;
+                if (product.size_type === 'waist') chart = isMen ? SIZE_CHARTS.waist_men : SIZE_CHARTS.waist_women;
+                if (product.size_type === 'footwear_uk') chart = isMen ? SIZE_CHARTS.shoes_men : SIZE_CHARTS.shoes_women;
+
+                return (
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-aura-espresso/10 bg-aura-cream/50">
+                        {chart.columns.map((col, idx) => (
+                          <th key={idx} className="py-2.5 px-3 font-mono font-medium uppercase tracking-wider text-aura-espresso">
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-aura-espresso/6 font-mono">
+                      {chart.rows.map((row, rIdx) => (
+                        <tr key={rIdx} className={row[0] === selectedSize ? 'bg-aura-cream/70 font-semibold' : 'hover:bg-aura-ivory'}>
+                          {row.map((cell, cIdx) => (
+                            <td key={cIdx} className="py-2.5 px-3 text-aura-espresso/90">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+
+            {/* Note & Footer */}
+            <div className="p-3.5 bg-aura-cream/50 rounded-2xl border border-aura-espresso/8 text-[11px] text-aura-muted leading-relaxed">
+              <p>
+                <span className="font-semibold text-aura-espresso font-mono uppercase tracking-wider">Note:</span> Measurements represent standard body proportions. Garment drape and fit may vary by silhouette and fabric stretch.
+              </p>
+            </div>
+
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => setShowSizeGuide(false)}
+                className="px-5 py-2 bg-aura-espresso text-aura-ivory rounded-full text-xs font-mono uppercase tracking-wider hover:bg-aura-dark transition-colors"
+              >
+                Close Guide
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -143,6 +143,13 @@ export default function SavedOutfitsView({
                           {formatProductPrice(it)}
                         </span>
                       </div>
+                      {it.selected_size && (
+                        <div className="pt-0.5">
+                          <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-aura-cream text-aura-espresso border border-aura-espresso/10">
+                            Size: {it.selected_size}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

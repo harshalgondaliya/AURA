@@ -13,21 +13,22 @@ export default function SimilarView({
 }) {
   const [mode, setMode] = useState('hybrid');
   const [filterCategory, setFilterCategory] = useState(true);
+  const [selectedSize, setSelectedSize] = useState('');
   const [similarItems, setSimilarItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!product) return;
-    loadSimilar(mode, filterCategory);
-  }, [product, mode, filterCategory]);
+    loadSimilar(mode, filterCategory, selectedSize);
+  }, [product, mode, filterCategory, selectedSize]);
 
-  const loadSimilar = async (selectedMode, strictCat) => {
+  const loadSimilar = async (selectedMode, strictCat, sizeScope = '') => {
     setLoading(true);
     setError(null);
     try {
       const genderScope = product?.gender || '';
-      const data = await fetchSimilarItems(product.article_id, 10, selectedMode, strictCat, genderScope);
+      const data = await fetchSimilarItems(product.article_id, 10, selectedMode, strictCat, genderScope, sizeScope);
       setSimilarItems(data);
     } catch (err) {
       console.error(err);
@@ -149,6 +150,46 @@ export default function SimilarView({
           <span className={`w-2 h-2 rounded-full ${filterCategory ? 'bg-aura-olive' : 'bg-aura-taupe/40'}`} />
         </button>
       </div>
+
+      {/* Available Size Filter Strip */}
+      {Array.isArray(product.sizes) && product.sizes.length > 0 && product.size_type !== 'onesize' && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 py-2.5 bg-white rounded-2xl border border-aura-espresso/8">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-aura-muted mr-2 font-medium">
+            Filter Similar by Size:
+          </span>
+          <button
+            onClick={() => setSelectedSize('')}
+            className={`px-3 py-1 rounded-full text-[10px] font-mono transition-all border ${
+              selectedSize === ''
+                ? 'bg-aura-espresso text-aura-ivory border-aura-espresso font-medium shadow-xs'
+                : 'bg-aura-ivory text-aura-espresso/70 border-aura-espresso/15 hover:border-aura-espresso/35'
+            }`}
+          >
+            All Sizes
+          </button>
+          {product.sizes.map((sz) => (
+            <button
+              key={sz}
+              onClick={() => setSelectedSize(selectedSize === sz ? '' : sz)}
+              className={`px-3 py-1 rounded-full text-[10px] font-mono transition-all border ${
+                selectedSize === sz
+                  ? 'bg-aura-espresso text-aura-ivory border-aura-espresso font-medium shadow-xs'
+                  : 'bg-aura-ivory text-aura-espresso/70 border-aura-espresso/15 hover:border-aura-espresso/35'
+              }`}
+            >
+              {sz}
+            </button>
+          ))}
+          {selectedSize && (
+            <button
+              onClick={() => setSelectedSize('')}
+              className="text-[10px] font-mono text-aura-olive hover:underline ml-1 uppercase tracking-wider"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Similar Items Gallery Grid */}
       {loading ? (

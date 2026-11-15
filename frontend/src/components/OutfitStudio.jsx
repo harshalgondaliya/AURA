@@ -36,9 +36,23 @@ export default function OutfitStudio({
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [resynthesizeCount, setResynthesizeCount] = useState(0);
+  const [selectedSizes, setSelectedSizes] = useState({});
   const [studioGender, setStudioGender] = useState(() => {
     return globalGender || localStorage.getItem('aura_catalog_gender') || 'all';
   });
+
+  const extractSizesFromData = (data) => {
+    const s = {};
+    if (data?.anchor) {
+      s.anchor = data.anchor.selected_size || (Array.isArray(data.anchor.sizes) && data.anchor.sizes.length > 0 ? data.anchor.sizes[0] : '');
+    }
+    if (data?.slots) {
+      Object.entries(data.slots).forEach(([k, item]) => {
+        s[k] = item.selected_size || (Array.isArray(item.sizes) && item.sizes.length > 0 ? item.sizes[0] : '');
+      });
+    }
+    return s;
+  };
 
   // Consume centralized WishlistContext with safe fallback
   let wishlistCtx = null;
@@ -61,8 +75,14 @@ export default function OutfitStudio({
     setFailedImages({});
     try {
       const data = await fetchOutfitRecommendations(aid, gender, [], 0);
-      setOutfitData(data);
-      setHistory([data]);
+      const initialSizes = extractSizesFromData(data);
+      if (anchorProduct?.selected_size) {
+        initialSizes.anchor = anchorProduct.selected_size;
+      }
+      setSelectedSizes(initialSizes);
+      const lookWithSizes = { ...data, selected_sizes: initialSizes };
+      setOutfitData(lookWithSizes);
+      setHistory([lookWithSizes]);
       setHistoryIndex(0);
       setResynthesizeCount(0);
       recordInteraction(activeUser, aid, 'view', { feature: 'outfit_studio' });
@@ -72,6 +92,23 @@ export default function OutfitStudio({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSizeChange = (key, sz) => {
+    setSelectedSizes((prev) => {
+      const updated = { ...prev, [key]: sz };
+      setHistory((prevHist) => {
+        const copy = [...prevHist];
+        if (copy[historyIndex]) {
+          copy[historyIndex] = {
+            ...copy[historyIndex],
+            selected_sizes: updated,
+          };
+        }
+        return copy;
+      });
+      return updated;
+    });
   };
 
   const handleResynthesize = async () => {
@@ -94,11 +131,17 @@ export default function OutfitStudio({
         anchor.article_id,
         studioGender,
         Array.from(seenIds),
-        nextCount
+        nextCount,
+        selectedSizes
       );
 
-      setOutfitData(nextData);
-      setHistory((prev) => [...prev, nextData]);
+      const nextSizes = extractSizesFromData(nextData);
+      const mergedSizes = { ...selectedSizes, ...nextSizes };
+      setSelectedSizes(mergedSizes);
+      const lookWithSizes = { ...nextData, selected_sizes: mergedSizes };
+
+      setOutfitData(lookWithSizes);
+      setHistory((prev) => [...prev, lookWithSizes]);
       setHistoryIndex(history.length);
       setResynthesizeCount(nextCount);
       onToast && onToast(`Synthesized Look ${history.length + 1}`, 'info');
@@ -113,8 +156,12 @@ export default function OutfitStudio({
   const handlePreviousLook = () => {
     if (historyIndex > 0) {
       const prevIdx = historyIndex - 1;
+      const prevLook = history[prevIdx];
       setHistoryIndex(prevIdx);
-      setOutfitData(history[prevIdx]);
+      setOutfitData(prevLook);
+      if (prevLook.selected_sizes) {
+        setSelectedSizes(prevLook.selected_sizes);
+      }
       setIsSaved(false);
     }
   };
@@ -122,8 +169,12 @@ export default function OutfitStudio({
   const handleNextLook = () => {
     if (historyIndex < history.length - 1) {
       const nextIdx = historyIndex + 1;
+      const nextLook = history[nextIdx];
       setHistoryIndex(nextIdx);
-      setOutfitData(history[nextIdx]);
+      setOutfitData(nextLook);
+      if (nextLook.selected_sizes) {
+        setSelectedSizes(nextLook.selected_sizes);
+      }
       setIsSaved(false);
     }
   };
@@ -134,7 +185,7 @@ export default function OutfitStudio({
     try {
       const itemIds = Object.values(outfitData.slots).map((s) => s.article_id);
       const outfitName = `Look: ${outfitData.anchor.prod_name} Ensemble`;
-      await saveOutfit(activeUser, outfitName, outfitData.anchor.article_id, itemIds);
+      await saveOutfit(activeUser, outfitName, outfitData.anchor.article_id, itemIds, selectedSizes);
       setIsSaved(true);
       onToast && onToast('Ensemble saved to your portfolio', 'success');
     } catch (err) {
@@ -383,6 +434,39 @@ export default function OutfitStudio({
             </div>
           </div>
 
+          {/* Anchor Size Selection */}
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center justify-between text-[10px] font-mono text-aura-muted">
+              <span className="uppercase tracking-widest font-medium">Selected Size</span>
+              <span>{anchor.size_type === 'onesize' ? 'Universal' : 'Tap to adjust'}</span>
+            </div>
+            {Array.isArray(anchor.sizes) && anchor.sizes.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {anchor.sizes.map((sz) => {
+                  const isSelected = (selectedSizes.anchor || anchor.selected_size) === sz;
+                  return (
+                    <button
+                      key={sz}
+                      type="button"
+                      onClick={() => handleSizeChange('anchor', sz)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-medium transition-all border ${
+                        isSelected
+                          ? 'bg-aura-espresso text-aura-ivory border-aura-espresso shadow-xs'
+                          : 'bg-aura-ivory text-aura-espresso border-aura-espresso/15 hover:border-aura-espresso/40'
+                      }`}
+                    >
+                      {sz}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <span className="text-[10px] font-mono text-aura-muted italic">
+                {anchor.size_type === 'onesize' ? 'One Size' : 'Size details unavailable'}
+              </span>
+            )}
+          </div>
+
           <button
             onClick={onNavigateCatalog}
             className="w-full py-3 px-4 bg-aura-cream hover:bg-aura-taupe/30 active:bg-aura-taupe/50 text-aura-espresso rounded-full text-xs font-medium uppercase tracking-wider transition-colors text-center"
@@ -485,6 +569,41 @@ export default function OutfitStudio({
                         <p className="text-[11px] text-aura-muted font-normal">
                           {item.product_type_name} &bull; {item.colour_group_name}
                         </p>
+                      </div>
+
+                      {/* Slot Size Selector */}
+                      <div className="pt-2 border-t border-aura-espresso/6 space-y-1">
+                        <div className="flex items-center justify-between text-[9px] font-mono text-aura-muted">
+                          <span className="uppercase tracking-wider">Size:</span>
+                          <span className="font-semibold text-aura-espresso">
+                            {selectedSizes[slotKey] || item.selected_size || 'Default'}
+                          </span>
+                        </div>
+                        {Array.isArray(item.sizes) && item.sizes.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto pr-1">
+                            {item.sizes.map((sz) => {
+                              const isSelected = (selectedSizes[slotKey] || item.selected_size) === sz;
+                              return (
+                                <button
+                                  key={sz}
+                                  type="button"
+                                  onClick={() => handleSizeChange(slotKey, sz)}
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-all border ${
+                                    isSelected
+                                      ? 'bg-aura-espresso text-aura-ivory border-aura-espresso font-semibold shadow-2xs'
+                                      : 'bg-aura-ivory text-aura-espresso/80 border-aura-espresso/15 hover:border-aura-espresso/35'
+                                  }`}
+                                >
+                                  {sz}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-[9px] font-mono text-aura-muted italic">
+                            {item.size_type === 'onesize' ? 'One Size' : 'Size details unavailable'}
+                          </span>
+                        )}
                       </div>
                     </div>
 

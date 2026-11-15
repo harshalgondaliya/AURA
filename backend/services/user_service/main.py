@@ -109,7 +109,7 @@ def get_user_history(
             seen.add(inter.article_id)
             prod = db.query(Product).filter(Product.article_id == inter.article_id).first()
             if prod:
-                products.append(ProductResponse.from_orm(prod))
+                products.append(prod.to_dict())
     return products
 
 @app.get("/users/{user_id}/favorites", response_model=List[ProductResponse])
@@ -143,7 +143,7 @@ def get_user_favorites(user_id: str, db: Session = Depends(get_db)):
     for aid in active_favorite_aids:
         p = db.query(Product).filter(Product.article_id == aid, Product.is_active == True).first()
         if p:
-            favorites.append(ProductResponse.from_orm(p).dict())
+            favorites.append(p.to_dict())
             
     cache.set_json(cache_key, favorites, ttl_seconds=60)
     return favorites
@@ -186,7 +186,7 @@ def remove_favorite(user_id: str, article_id: str, db: Session = Depends(get_db)
 
 @app.post("/outfits/save", status_code=status.HTTP_201_CREATED)
 def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):
-    """Feature B & C: Save a complete outfit look."""
+    """Feature B & C: Save a complete outfit look with garment sizes."""
     ensure_product_exists(db, req.anchor_article_id)
     outfit_uuid = f"outfit_{uuid.uuid4().hex[:12]}"
     outfit = SavedOutfit(
@@ -199,12 +199,34 @@ def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):
     db.add(outfit)
     db.commit()
 
+    # Consolidate items ensuring anchor is always the primary garment
+    all_items_to_save = []
+    if req.anchor_article_id not in req.item_article_ids:
+        anchor_sz = None
+        if req.selected_sizes:
+            anchor_sz = req.selected_sizes.get(req.anchor_article_id) or req.selected_sizes.get("anchor")
+        all_items_to_save.append((req.anchor_article_id, "anchor", anchor_sz))
+
     for idx, aid in enumerate(req.item_article_ids):
+        p_obj = db.query(Product).filter(Product.article_id == aid).first()
+        slot_name = p_obj.standard_category if (p_obj and p_obj.standard_category) else f"slot_{idx+1}"
+        chosen_sz = None
+        if req.selected_sizes:
+            chosen_sz = (
+                req.selected_sizes.get(aid)
+                or req.selected_sizes.get(slot_name)
+                or req.selected_sizes.get(f"slot_{idx}")
+                or req.selected_sizes.get(f"slot_{idx+1}")
+            )
+        all_items_to_save.append((aid, slot_name, chosen_sz))
+
+    for aid, slot_name, chosen_sz in all_items_to_save:
         ensure_product_exists(db, aid)
         item = OutfitItem(
             outfit_id=outfit_uuid,
             article_id=aid,
-            slot=f"slot_{idx}" if idx > 0 else "anchor"
+            slot=slot_name,
+            selected_size=chosen_sz
         )
         db.add(item)
     db.commit()
@@ -213,7 +235,7 @@ def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):
 @app.get("/users/{user_id}/outfits")
 def get_saved_outfits(user_id: str, db: Session = Depends(get_db)):
     """Retrieve all outfits saved by the user."""
-    outfits = db.query(SavedOutfit).filter(SavedOutfit.user_id == user_id).all()
+    outfits = db.query(SavedOutfit).filter(SavedOutfit.user_id == user_id).order_by(SavedOutfit.created_at.desc()).all()
     results = []
     for o in outfits:
         items = db.query(OutfitItem).filter(OutfitItem.outfit_id == o.outfit_id).all()
@@ -221,7 +243,9 @@ def get_saved_outfits(user_id: str, db: Session = Depends(get_db)):
         for it in items:
             p = db.query(Product).filter(Product.article_id == it.article_id).first()
             if p:
-                prod_list.append(ProductResponse.from_orm(p).dict())
+                p_data = p.to_dict(selected_size=it.selected_size)
+                p_data["slot"] = it.slot
+                prod_list.append(p_data)
         results.append({
             "outfit_id": o.outfit_id,
             "outfit_name": o.outfit_name,
