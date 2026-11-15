@@ -123,7 +123,7 @@ def get_products(
         query = query.filter(search_filter)
         
     total = query.count()
-    items = query.offset((page - 1) * limit).limit(limit).all()
+    items = query.order_by(Product.has_image.desc(), Product.id.asc()).offset((page - 1) * limit).limit(limit).all()
     
     resp = {
         "total": total,

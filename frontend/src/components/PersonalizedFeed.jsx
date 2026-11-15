@@ -5,6 +5,7 @@ import ProductCard from './ProductCard';
 
 export default function PersonalizedFeed({
   activeUser,
+  gender = 'all',
   onSimilarClick,
   onOutfitClick,
   onLikeClick,
@@ -17,27 +18,39 @@ export default function PersonalizedFeed({
   const [recommendations, setRecommendations] = useState([]);
   const [historyItems, setHistoryItems] = useState([]);
   const [favorites, setFavorites] = useState([]);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const [feedNotification, setFeedNotification] = useState('');
 
   useEffect(() => {
-    loadPersonalizedData();
-  }, [activeUser, recentViewIds.length]);
+    loadPersonalizedData(0);
+  }, [activeUser, recentViewIds.length, gender]);
 
-  const loadPersonalizedData = async () => {
+  const loadPersonalizedData = async (offset = 0) => {
     setLoading(true);
     try {
       const [recs, hist, favs] = await Promise.all([
-        fetchPersonalizedFeed(activeUser, 10, recentViewIds),
+        fetchPersonalizedFeed(activeUser, 10, recentViewIds, gender, '', offset > 0, offset),
         fetchUserHistory(activeUser),
         fetchUserFavorites(activeUser),
       ]);
       setRecommendations(recs);
       setHistoryItems(hist);
       setFavorites(favs);
+      if (offset > 0) {
+        setFeedNotification('Feed refreshed with new curated pieces');
+        setTimeout(() => setFeedNotification(''), 3000);
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefreshClick = () => {
+    const nextOffset = refreshCount + 1;
+    setRefreshCount(nextOffset);
+    loadPersonalizedData(nextOffset);
   };
 
   return (
@@ -57,14 +70,22 @@ export default function PersonalizedFeed({
           </p>
         </div>
 
-        <button
-          onClick={loadPersonalizedData}
-          disabled={loading}
-          className="self-start md:self-center flex items-center gap-2 px-6 py-3 bg-aura-espresso hover:bg-aura-dark active:scale-[0.98] text-aura-ivory rounded-full text-xs font-medium uppercase tracking-wider transition-all shadow-xs"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh Feed</span>
-        </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRefreshClick}
+              disabled={loading}
+              className="self-start md:self-center flex items-center gap-2 px-6 py-3 bg-aura-espresso hover:bg-aura-dark active:scale-[0.98] text-aura-ivory rounded-full text-xs font-medium uppercase tracking-wider transition-all shadow-xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Refresh Feed</span>
+            </button>
+            {feedNotification && (
+              <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full animate-fade-in inline-flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-emerald-600" />
+                {feedNotification}
+              </span>
+            )}
+          </div>
       </div>
 
       {/* Section 1: Recommended For You */}

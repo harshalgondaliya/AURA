@@ -30,6 +30,55 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   // Centralized Wishlist Store Hook
   const { wishlistIds, isWishlisted, toggleWishlist, wishlistCount } = useWishlist();
 
+  // URL Query Sync on Mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab') || params.get('view');
+    const genderParam = params.get('gender');
+    const catParam = params.get('category');
+    if (tabParam && ['discover', 'shop', 'outfits', 'for_you', 'wishlist', 'saved_outfits', 'architecture'].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+    if (genderParam && ['women', 'men', 'all'].includes(genderParam)) {
+      setSelectedGender(genderParam);
+    }
+    if (catParam) {
+      setSelectedCategory(catParam);
+    }
+  }, []);
+
+  // Update Browser URL on State Changes
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (activeTab === 'discover') {
+      url.searchParams.delete('tab');
+      url.searchParams.delete('view');
+    } else {
+      url.searchParams.set('tab', activeTab);
+    }
+    if (activeTab === 'shop') {
+      if (selectedGender && selectedGender !== 'all') {
+        url.searchParams.set('gender', selectedGender);
+      } else {
+        url.searchParams.delete('gender');
+      }
+      if (selectedCategory) {
+        url.searchParams.set('category', selectedCategory);
+      } else {
+        url.searchParams.delete('category');
+      }
+    } else {
+      url.searchParams.delete('gender');
+      url.searchParams.delete('category');
+    }
+    if (activeTab === 'product' && selectedProduct) {
+      url.searchParams.set('product', selectedProduct.article_id);
+    } else {
+      url.searchParams.delete('product');
+    }
+    window.history.replaceState({}, '', url.toString());
+  }, [activeTab, selectedGender, selectedCategory, selectedProduct]);
+
   const handleGenderChange = (gender) => {
     setSelectedGender(gender);
     localStorage.setItem('aura_catalog_gender', gender);

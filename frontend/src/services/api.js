@@ -95,7 +95,7 @@ export async function fetchOutfitRecommendations(anchorArticleId, gender = '', e
   return res.json();
 }
 
-export async function fetchPersonalizedFeed(userId, topK = 12, recentViews = [], gender = '', size = '') {
+export async function fetchPersonalizedFeed(userId, topK = 12, recentViews = [], gender = '', size = '', refresh = false, offset = 0) {
   const params = new URLSearchParams({ top_k: topK });
   if (recentViews.length > 0) {
     params.append('recent_views', recentViews.join(','));
@@ -105,6 +105,11 @@ export async function fetchPersonalizedFeed(userId, topK = 12, recentViews = [],
   }
   if (size && size !== 'all') {
     params.append('size', size);
+  }
+  if (refresh) {
+    params.append('refresh', 'true');
+    params.append('offset', offset.toString());
+    params.append('_t', Date.now().toString());
   }
   const res = await fetch(`${BASE_URL}/recommendations/personalized/${userId}?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch personalized feed: ${res.statusText}`);
@@ -193,13 +198,13 @@ export async function fetchSavedOutfits(userId) {
 }
 
 export async function fetchSystemHealth() {
-  const res = await fetch(`${BASE_URL}/health`);
+  const res = await fetch(`${BASE_URL}/health?_t=${Date.now()}`);
   if (!res.ok) throw new Error('System health check failed');
   return res.json();
 }
 
 export async function fetchSystemMetrics() {
-  const res = await fetch(`${BASE_URL}/metrics`);
+  const res = await fetch(`${BASE_URL}/metrics?_t=${Date.now()}`);
   if (!res.ok) throw new Error('System metrics check failed');
   return res.json();
 }

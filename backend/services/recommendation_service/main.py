@@ -401,13 +401,16 @@ def get_personalized_recommendations(
     top_k: int = Query(default=10, ge=1, le=30),
     gender: Optional[str] = Query(default=None),
     size: Optional[str] = Query(default=None),
-    recent_views: Optional[str] = Query(default=None) # Comma-separated article_ids
+    recent_views: Optional[str] = Query(default=None), # Comma-separated article_ids
+    refresh: bool = Query(default=False),
+    offset: int = Query(default=0)
 ):
-    """Features C & D: Continuous Personalization Feed with Gender and Size Scope."""
-    cache_key = f"rec:user:{user_id}:k{top_k}:g{gender}:sz{size}:rv{recent_views}"
-    cached = cache.get_json(cache_key)
-    if cached:
-        return cached
+    """Features C & D: Continuous Personalization Feed with Gender, Size Scope & Dynamic Refresh."""
+    cache_key = f"rec:user:{user_id}:k{top_k}:g{gender}:sz{size}:rv{recent_views}:o{offset}"
+    if not refresh and offset == 0:
+        cached = cache.get_json(cache_key)
+        if cached:
+            return cached
 
     results = []
     seen_aids = set()
@@ -415,8 +418,15 @@ def get_personalized_recommendations(
     # If user recently clicked/viewed items, blend recommendations across recent items
     if recent_views:
         recent_aids = [a.strip() for a in recent_views.split(",") if a.strip() in article_meta]
+        if offset > 0 and len(recent_aids) > 1:
+            rot = offset % len(recent_aids)
+            recent_aids = recent_aids[rot:] + recent_aids[:rot]
+            
         for aid in recent_aids[-3:]:
-            sim_items = get_similar_items(aid, top_k=4, mode="hybrid", filter_category=True, gender=gender, size=size)
+            sim_items = get_similar_items(aid, top_k=6, mode="hybrid", filter_category=True, gender=gender, size=size)
+            if offset > 0 and len(sim_items) > 1:
+                s_rot = offset % len(sim_items)
+                sim_items = sim_items[s_rot:] + sim_items[:s_rot]
             for it in sim_items:
                 if it["article_id"] not in seen_aids and it["article_id"] != aid:
                     seen_aids.add(it["article_id"])
@@ -426,9 +436,14 @@ def get_personalized_recommendations(
             if len(results) >= top_k:
                 break
 
-    # Fill remainder with trending popular items matching gender & size
+    # Fill remainder with trending popular items matching gender & size with offset rotation
     if len(results) < top_k:
-        for aid in popular_articles:
+        candidate_popular = list(popular_articles)
+        if offset > 0 and len(candidate_popular) > 0:
+            p_rot = (offset * 7) % len(candidate_popular)
+            candidate_popular = candidate_popular[p_rot:] + candidate_popular[:p_rot]
+
+        for aid in candidate_popular:
             if aid not in seen_aids and aid in article_meta:
                 meta = article_meta[aid]
                 if gender:
@@ -447,5 +462,6 @@ def get_personalized_recommendations(
             if len(results) >= top_k:
                 break
 
-    cache.set_json(cache_key, results, ttl_seconds=180)
+    if not refresh and offset == 0:
+        cache.set_json(cache_key, results, ttl_seconds=180)
     return results[:top_k]
