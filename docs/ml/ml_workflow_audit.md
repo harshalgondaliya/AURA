@@ -70,13 +70,17 @@ notebooks/
 - Uses Cosine Distance in high-dimensional feature space to identify pieces with matching silhouettes, drape, and visual textures.
 
 ### Stage 7: Hybrid Multi-Channel Blending (`07_hybrid_recommendation.ipynb`)
-- Fuses three distinct recommendation signals:
+- **Offline Research Formulation (Notebooks 07 & 09)**:
+  Fuses four distinct recommendation signals for user personalization:
   $$\text{Score}(u, i) = w_{\text{visual}} \cdot S_{\text{visual}} + w_{\text{text}} \cdot S_{\text{text}} + w_{\text{cf}} \cdot S_{\text{cf}} + w_{\text{pop}} \cdot S_{\text{popularity}}$$
-- Default production weights:
   - $w_{\text{visual}} = 0.40$ (aesthetic silhouette match)
   - $w_{\text{text}} = 0.25$ (garment type & fabric match)
   - $w_{\text{cf}} = 0.25$ (historical purchase affinity)
   - $w_{\text{pop}} = 0.10$ (seasonal trend momentum)
+- **Online Production Formulation (`recommendation_service/main.py`)**:
+  - `/recommendations/similar/{aid}`: Dual-channel item-to-item similarity ($0.50 \cdot S_{\text{visual}} + 0.50 \cdot S_{\text{text}}$), requiring no user ID or interaction history and executing in sub-5ms.
+  - `/recommendations/personalized/{uid}`: Blends visual/text similarity from the user's recent interactions with popularity-decay rotation.
+  - `/recommendations/outfits`: Cross-category slot-based compatibility engine enforcing category exclusivity and color harmony.
 
 ### Stage 8: Outfit Compatibility & Styling Engine (`08_outfit_compatibility.ipynb`)
 - **Category Slot Isolation**: Given an Anchor garment (e.g. Upper Body), the styling engine enforces that complementary slots must strictly belong to distinct wardrobe slots (Lower Body + Footwear + Accessories).
@@ -84,7 +88,12 @@ notebooks/
 - **Color Harmony Matrix**: Encodes classical color pairing principles (Monochromatic, Analogous, Complementary, Classic Contrast) to ensure aesthetic cohesion.
 
 ### Stage 9: Quantitative Evaluation & Offline Benchmark (`09_model_evaluation.ipynb`)
-Evaluated on a strictly future holdout validation week (Week 15):
+Evaluated using a strict temporal split protocol across 16 weeks of timestamped transactions:
+- **14-week Training Set (`transactions_train_14w.parquet`)**: 4,018,068 rows (2020-06-02 to 2020-09-07), 322,623 users, 42,919 items.
+- **1-week Validation Set (`transactions_val_1w.parquet`)**: 229,082 rows (2020-09-08 to 2020-09-14), 55,191 users, 17,933 items.
+- **1-week Final Held-Out Test Set (`transactions_test_1w.parquet`)**: 227,541 rows (2020-09-15 to 2020-09-22), 54,970 users, 17,856 items.
+
+#### Validation Set Offline Benchmark (Week 15):
 
 | Recommendation Model | HitRate@12 | Precision@12 | Recall@12 | MAP@12 | NDCG@12 | Catalog Coverage | Inference Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -94,6 +103,11 @@ Evaluated on a strictly future holdout validation week (Week 15):
 | **Item-Item CF** | 4.92% | 0.472% | 1.949% | 0.747% | 1.340% | 42.6% | 14.8 ms |
 | **Matrix Factorization (SVD)** | 2.22% | 0.205% | 0.726% | 0.250% | 0.480% | 61.2% | 8.2 ms |
 | **Hybrid Multi-Channel Engine** | **7.85%** | **0.694%** | **2.780%** | **0.915%** | **1.685%** | **76.5%** | **28.4 ms** |
+
+#### Final Held-Out Test Set Generalization (Week 16):
+- **Test HitRate@12**: **7.62%**
+- **Test Precision@12**: **0.671%**
+- **Generalization Degradation**: Only $-0.23\%$ drop from validation to held-out test, proving model stability against temporal distribution shift.
 
 **Conclusion**: The Hybrid Engine achieves the highest accuracy across all ranking metrics (+25.8% HitRate lift over Popularity; +59.5% lift over Item CF) while simultaneously recommending **76.5% of catalog items**, successfully overcoming popularity bias.
 

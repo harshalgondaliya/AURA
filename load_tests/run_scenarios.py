@@ -148,19 +148,21 @@ def run_load_test_suite():
         p_client.get("/products/0559129003")
         warm_lats.append((time.perf_counter() - t_w) * 1000)
         
+    all_lats_s4 = [cold_lat] + warm_lats
     s4 = {
         "Scenario": "4. Cache Warm-Up",
-        "Total_Requests": 21,
-        "RPS": round(21 / (sum(warm_lats)/1000 + cold_lat/1000), 1),
-        "Avg_Latency_ms": round(float(np.mean(warm_lats)), 2),
-        "p50_Latency_ms": round(float(np.median(warm_lats)), 2),
-        "p95_Latency_ms": round(float(cold_lat), 2),
-        "p99_Latency_ms": round(float(cold_lat), 2),
+        "Total_Requests": len(all_lats_s4),
+        "RPS": round(len(all_lats_s4) / (sum(all_lats_s4) / 1000), 1),
+        "Avg_Latency_ms": round(float(np.mean(all_lats_s4)), 2),
+        "p50_Latency_ms": round(float(np.median(all_lats_s4)), 2),
+        "p95_Latency_ms": round(float(np.quantile(all_lats_s4, 0.95)), 2),
+        "p99_Latency_ms": round(float(np.quantile(all_lats_s4, 0.99)), 2),
         "Error_Rate_Pct": 0.0,
         "HTTP_429_Count": 0
     }
     scenario_results.append(s4)
-    print(f"  Result: Cold Query: {cold_lat:.2f} ms -> Warmed Cache: {np.mean(warm_lats):.2f} ms ({cold_lat/np.mean(warm_lats):.1f}x speedup!)")
+    speedup_s4 = cold_lat / np.mean(warm_lats) if np.mean(warm_lats) > 0 else 1.0
+    print(f"  Result: Cold Query: {cold_lat:.2f} ms -> Warmed Cache Avg: {np.mean(warm_lats):.2f} ms ({speedup_s4:.2f}x speedup!)")
 
     # -------------------------------------------------------------------------
     # SCENARIO 5: Cache Hit vs. Cache Miss
@@ -180,19 +182,21 @@ def run_load_test_suite():
         p_client.get("/products?limit=10&page=1")
         hit_lats.append((time.perf_counter() - t_h) * 1000)
         
+    all_lats_s5 = miss_lats + hit_lats
     s5 = {
         "Scenario": "5. Cache Hit vs Miss",
-        "Total_Requests": len(miss_lats) + len(hit_lats),
-        "RPS": round(45 / ((sum(miss_lats) + sum(hit_lats))/1000), 1),
-        "Avg_Latency_ms": round(float(np.mean(hit_lats)), 2),
-        "p50_Latency_ms": round(float(np.median(hit_lats)), 2),
-        "p95_Latency_ms": round(float(np.quantile(miss_lats, 0.95)), 2),
-        "p99_Latency_ms": round(float(np.quantile(miss_lats, 0.99)), 2),
+        "Total_Requests": len(all_lats_s5),
+        "RPS": round(len(all_lats_s5) / (sum(all_lats_s5) / 1000), 1),
+        "Avg_Latency_ms": round(float(np.mean(all_lats_s5)), 2),
+        "p50_Latency_ms": round(float(np.median(all_lats_s5)), 2),
+        "p95_Latency_ms": round(float(np.quantile(all_lats_s5, 0.95)), 2),
+        "p99_Latency_ms": round(float(np.quantile(all_lats_s5, 0.99)), 2),
         "Error_Rate_Pct": 0.0,
         "HTTP_429_Count": 0
     }
     scenario_results.append(s5)
-    print(f"  Result: Cache Miss Latency: {np.mean(miss_lats):.2f} ms vs Cache Hit Latency: {np.mean(hit_lats):.2f} ms")
+    speedup_s5 = np.mean(miss_lats) / np.mean(hit_lats) if np.mean(hit_lats) > 0 else 1.0
+    print(f"  Result: Cache Miss Latency: {np.mean(miss_lats):.2f} ms vs Cache Hit Latency: {np.mean(hit_lats):.2f} ms ({speedup_s5:.2f}x speedup!)")
 
     # -------------------------------------------------------------------------
     # SCENARIO 6: Downstream Service Failure & Circuit Breaker

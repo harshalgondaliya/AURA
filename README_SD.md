@@ -128,20 +128,30 @@ The Gateway forwards requests dynamically:
   - `outfit_items`: Individual garments belonging to an ensemble with specific slot and size.
   - `recommendation_jobs`: Asynchronous jobs tracking (`pending` &rarr; `processing` &rarr; `completed`).
 - **Data Persistence**: Backed by a named Docker volume (`postgres_data`). If you stop, restart, or recreate the containers, not a single piece of user data is lost.
+- **Database Migration Pipeline (`database/migrations/`)**:
+  - Reproducible, version-controlled schema evolution managed by `migrate.py` without data destruction:
+    - `001_initial_schema.sql`: Idempotent DDL establishing core tables, enum constraints, and initial indices.
+    - `002_add_sizing_and_indexes.sql`: Non-destructive schema expansion adding `available_sizes`, `size_inventory`, and composite query indices (`idx_products_gender_cat_idx`).
+    - `schema_migrations` Table: Audit log recording migration names, execution timestamps, execution duration, and success status.
+  - CLI usage:
+    ```bash
+    python database/migrations/migrate.py --status   # Inspect pending vs applied migrations
+    python database/migrations/migrate.py            # Apply pending migrations safely
+    ```
 
-### 2. Redis In-Memory Caching (5.8x Acceleration)
+### 2. Redis In-Memory Caching (5.35x Acceleration)
 - **Why Cache?**: ML vector calculations and complex database queries take 15–30 ms. Re-running the exact same query when 100 users visit the homepage is wasteful.
 - **How It Works**:
   - When a query arrives (e.g., `GET /api/products/0331072001`), the service checks Redis first using key `product:0331072001`.
-  - **Cache Hit**: Data is in Redis &rarr; returned in **3.2 ms** (zero database load).
-  - **Cache Miss**: Data is not in Redis &rarr; fetched from PostgreSQL (~18 ms) &rarr; written to Redis with a TTL &rarr; returned to client.
+  - **Cache Hit**: Data is in Redis &rarr; returned in **3.41 ms** (zero database load).
+  - **Cache Miss**: Data is not in Redis &rarr; fetched from PostgreSQL (18.24 ms) &rarr; written to Redis with a TTL &rarr; returned to client.
 - **Cache TTLs (Time-To-Live)**:
   - Product details: TTL 300s (5 minutes)
   - Recommendations: TTL 300s (5 minutes)
   - Categories: TTL 3600s (1 hour)
 - **Empirical Benchmark**:
-  - Cold query (database read): ~18.2 ms
-  - Warm query (Redis cache hit): **~3.4 ms** &rarr; **5.8x speedup!**
+  - Cold query (database read): **18.24 ms**
+  - Warm query (Redis cache hit): **3.41 ms** &rarr; **5.35x speedup** (approx. **5.4x**)
 
 ### 3. Asynchronous Worker Queue (`fashion_worker_service`)
 Some operations (like multi-slot combinatorial outfit styling over 100 candidate garments) are computationally heavy. If you run them synchronously in the user's HTTP request, the browser hangs.
@@ -325,11 +335,11 @@ Here is the exact journey of what happens when a user clicks a product in the br
 
 ### Q12: "How much performance improvement did Redis caching provide?"
 > **Answer:**  
-> *"In our empirical load benchmarks, cold queries hitting PostgreSQL took an average of 18.2 milliseconds. Queries hitting the Redis cache took an average of 3.4 milliseconds. That represents a 5.8x speedup and reduced database CPU utilization by over 80%."*
+> *"In our empirical load benchmarks, cold queries hitting PostgreSQL took an average of 18.24 milliseconds. Queries hitting the Redis cache took an average of 3.41 milliseconds. That represents a 5.35x speedup (approximately 5.4x) and reduced database CPU utilization by over 80%."*
 
 ### Q13: "What load testing did you perform on this system?"
 > **Answer:**  
-> *"We executed 8 comprehensive load test scenarios using Python concurrent clients and Locust. We tested baseline load, traffic spikes, rate limiter exhaustion, cache warm-up vs. cold misses, downstream service failure with circuit breaker tripping, worker queue under load, and recovery. The system sustained over 850 requests per second on cached reads with zero dropped requests."*
+> *"We executed 8 comprehensive load test scenarios using Python concurrent clients and Locust. We tested baseline load, traffic spikes, rate limiter exhaustion, cache warm-up vs. cold misses, downstream service failure with circuit breaker tripping, worker queue under load, and recovery. In terms of throughput: normal mixed catalog browsing sustained 104.2 requests per second (RPS); during downstream failure with circuit breaker fast-fail fallback, throughput reached 221.7 RPS; and dedicated high-concurrency cached read benchmarks sustained over 850 RPS."*
 
 ### Q14: "How does your system prevent cross-gender contamination in recommendations?"
 > **Answer:**  
@@ -338,3 +348,28 @@ Here is the exact journey of what happens when a user clicks a product in the br
 ### Q15: "What happens if the Redis container crashes?"
 > **Answer:**  
 > *"Our services implement safe fallback wrappers. If Redis is unavailable, the rate limiter fails open (allows requests through rather than taking down the entire site), the caching layer falls back directly to PostgreSQL queries, and the Gateway circuit breaker reports the degraded state via `/api/health`."*
+
+---
+
+## 9. Verified Evidence, Constraints & Academic Limitations
+
+To ensure absolute academic integrity and rigorous defense during evaluation, the following empirical boundaries, deployment constraints, and design trade-offs are formally documented:
+
+### 1. Throughput Regimes & Measurement Boundaries
+- **104.2 RPS (Mixed Catalog Traffic)**: Sustained during Scenario 1 with mixed read/write query patterns across PostgreSQL without saturation.
+- **221.7 RPS (Circuit Breaker Fast-Fail)**: Achieved during Scenario 6 when the circuit breaker is OPEN, returning synthetic cached fallbacks in $<1\text{ ms}$ without consuming downstream HTTP worker threads.
+- **>850 RPS (Cached Single-Endpoint Benchmark)**: Achieved exclusively on warm Redis cache hits at the API Gateway level under maximum Locust concurrency. Cold PostgreSQL queries are bounded by connection pool limits (20 connections) and disk I/O.
+- **HTTP 429 Status Classification**: In load test reporting, HTTP 429 responses under traffic bursts represent intended security interventions by the Token Bucket rate limiter, not unhandled system errors or infrastructure dropouts.
+
+### 2. Concurrency, Race Conditions & Thread Safety
+- **Atomic Lua Rate Limiting**: The Token Bucket algorithm runs inside an atomic Redis Lua script (`EVALSHA`), guaranteeing that token decrement and refill timestamps are evaluated without race conditions across multiple API Gateway processes.
+- **Gateway Worker Event Loop**: The FastAPI Gateway uses Python's asynchronous `asyncio` event loop. While Redis operations are atomic, long-running non-async blocking functions within Python workers would block the event loop; thus, all HTTP proxy dispatches use `httpx.AsyncClient`.
+- **Database Connection Pools**: PostgreSQL connections are pooled via SQLAlchemy `QueuePool` with bounded max overflow (10 pool size, 20 max overflow) to prevent connection starvation under sudden traffic surges.
+
+### 3. Persistence & Volume Lifecycle
+- **Relational Integrity**: PostgreSQL table schemas, indices, and transactional rows are stored in the named Docker volume `postgres_data` mapped to `/var/lib/postgresql/data`. This guarantees persistence across container rebuilds (`docker compose down && docker compose up`).
+- **Database Schema Evolution**: Schema changes are managed strictly through version-controlled migration scripts (`database/migrations/001_initial_schema.sql` and `002_add_sizing_and_indexes.sql`) tracked in the `schema_migrations` audit table. Running `python database/migrations/migrate.py` ensures idempotent schema state across environments.
+- **Redis Non-Persistence**: Redis runs as an in-memory cache and volatile queue. While Redis RDB/AOF can be enabled, worker tasks in `queue:recommendation_tasks` are ephemeral; in production enterprise environments, a persistent queue broker like RabbitMQ, Apache Kafka, or AWS SQS would be deployed for durable job guarantees.
+
+### 4. Circuit Breaker Calibration
+- **Demonstration vs. Production Thresholds**: The circuit breaker is configured with a threshold of 5 consecutive failures and an 8.0-second recovery cooldown. This is calibrated for responsive viva demonstration and reproducible load tests. In large-scale production, dynamic rolling-window failure rates (e.g., 50% failures over 100 requests across a 10s window) are recommended to avoid premature tripping on isolated transient errors.

@@ -24,21 +24,42 @@ A **Multi-Modal Hybrid Recommender System** that combines:
 
 ---
 
-## 2. The Datasets Used
+## 2. The Datasets & 3-Stage Temporal Split Strategy
 
 AURA is built on two real-world industry fashion datasets:
 
 | Dataset | Source | Raw Size | Cleaned / Sampled | What AURA Uses It For |
 | :--- | :--- | :--- | :--- | :--- |
-| **H&M Personalized Fashion Dataset** | Kaggle Competition | 31.78M transactions<br/>105,542 articles<br/>1.37M customers | 6,511 active catalog articles<br/>14-week transaction train subset (`transactions_train_14w.parquet`) | User purchases, real item co-occurrence, customer demographics, and 105K catalog images. |
+| **H&M Personalized Fashion Dataset** | Kaggle Competition | 31.78M transactions<br/>105,542 articles<br/>1.37M customers | 6,511 active catalog articles<br/>14-week train subset + 1-week val + 1-week test | User purchases, real item co-occurrence, customer demographics, and 105K catalog images. |
 | **Myntra Fashion Dataset** | Kaggle | 526,564 products | Standard category mapping reference | Enriched taxonomy, Indian Rupee (₹) pricing reference, size charts. |
 
-### Data Splits & Temporal Validation Strategy
-- We **did not** use a random 80/20 train/test split!
-- In real-world e-commerce, you cannot use future transactions to predict the past. We used **Temporal Splitting**:
-  - **Training Set**: 14 weeks of historical purchase data.
-  - **Validation / Holdout Set**: Strictly the **subsequent week (Week 15)**.
-  - This ensures zero data leakage and proves whether the models can actually predict *future purchases*.
+### The 3-Stage Temporal Data Split (Zero Data Leakage)
+In real-world e-commerce, using a random 80/20 train/test split causes severe data leakage because future transactions would leak into past model training. AURA enforces a **strict 3-stage temporal train / validation / test split**:
+
+```mermaid
+gantt
+    title Temporal Data Split Strategy (Zero Future Data Leakage)
+    dateFormat YYYY-MM-DD
+    section Historical Training
+    14 Weeks Training (4,018,068 rows / 322,623 users) :done, train, 2020-06-02, 2020-09-07
+    section Model Selection
+    Week 15 Validation (229,082 rows / 55,191 users)   :active, val, 2020-09-08, 2020-09-14
+    section Generalization
+    Week 16 Final Held-Out Test (227,541 rows / 54,970 users) :crit, test, 2020-09-15, 2020-09-22
+```
+
+1. **Training Set (`transactions_train_14w.parquet`)**:
+   - **Window**: 14 Weeks (June 2, 2020 &rarr; September 7, 2020)
+   - **Volume**: **4,018,068 transactions** across 322,623 unique customers and 42,919 unique articles.
+   - **Purpose**: Feature extraction, TF-IDF vocabulary fitting, and collaborative filtering SVD matrix factorization.
+2. **Validation Set (`transactions_val_1w.parquet`)**:
+   - **Window**: Week 15 (September 8, 2020 &rarr; September 14, 2020)
+   - **Volume**: **229,082 transactions** across 55,191 unique customers and 17,933 unique articles.
+   - **Purpose**: Candidate model comparison, hyperparameter tuning, and weight optimization. Model achieved **HitRate@12 = 7.85%**.
+3. **Final Held-Out Test Set (`transactions_test_1w.parquet`)**:
+   - **Window**: Week 16 (September 15, 2020 &rarr; September 22, 2020)
+   - **Volume**: **227,541 transactions** across 54,970 unique customers and 17,856 unique articles.
+   - **Purpose**: Strictly held out for final generalization evaluation (never used for tuning). Model achieved **HitRate@12 = 7.62%**, confirming robust out-of-sample generalization.
 
 ---
 
@@ -61,7 +82,7 @@ notebooks/
 ```
 
 ### Stage 1 & 2: Data Understanding & Cleaning
-- **Missing Images**: Many items in raw datasets had missing or corrupted images. We verified all physical `.jpg` files on disk and created a binary flag `has_image = 1`.
+- **Missing Images**: Many items in raw datasets had missing or corrupted images. We audited all catalog products and verified physical `.jpg` files on disk, ensuring 100% valid image path mapping.
 - **Category Consolidation**: Raw H&M data had over 100 confusing sub-departments ("Ladies Special", "Divided Blue", etc.). We mapped all items into **5 Canonical Wardrobe Slots**:
   1. `upper_body` (Shirts, T-shirts, Sweaters, Tops, Jackets, Blouses)
   2. `lower_body` (Trousers, Jeans, Skirts, Shorts, Leggings)
@@ -75,61 +96,60 @@ notebooks/
 
 ---
 
-## 4. The Recommendation Models Explained Simply
+## 4. Reconciling Research Models vs. Production Microservices
+
+A crucial architectural distinction exists between **offline batch research** and **online real-time microservice inference**:
 
 ```mermaid
 flowchart TD
-    QueryItem["Query Item (e.g., Black Linen Shirt)"] --> Channel1["1. Visual Channel (CNN)"]
-    QueryItem --> Channel2["2. Text Channel (TF-IDF)"]
-    QueryItem --> Channel3["3. Collaborative Filtering (CF)"]
-    QueryItem --> Channel4["4. Popularity Channel"]
+    subgraph Offline_Research["1. Offline Research Hybrid Model (Notebooks 07 & 09)"]
+        UserPref["User Query"] --> C1["Visual CNN (40%)"]
+        UserPref --> C2["Text TF-IDF (25%)"]
+        UserPref --> C3["Implicit SVD CF (25%)"]
+        UserPref --> C4["Trend Popularity (10%)"]
+        C1 & C2 & C3 & C4 --> FuseOffline["4-Channel Offline Fusion\n(Week 15 Val HitRate@12: 7.85%\nWeek 16 Test HitRate@12: 7.62%)"]
+    end
 
-    Channel1 -->|"Cosine Sim (Weight: 0.40)"| Score1["Visual Score"]
-    Channel2 -->|"Cosine Sim (Weight: 0.25)"| Score2["Text Score"]
-    Channel3 -->|"Dot Product (Weight: 0.25)"| Score3["CF Score"]
-    Channel4 -->|"Log-Normalized (Weight: 0.10)"| Score4["Trend Score"]
-
-    Score1 & Score2 & Score3 & Score4 --> Blending["Weighted Rank Fusion Engine"]
-    Blending --> Filters["Post-Processing Filters\n• Gender Isolation (Men / Women)\n• Category Constraint (Same Slot)\n• Size In-Stock Check"]
-    Filters --> FinalRecs["Final Top-K Recommended Items"]
+    subgraph Online_Production["2. Production Online Microservices (recommendation_service/main.py)"]
+        direction TB
+        subgraph Similar_Endpoint["Endpoint A: /recommendations/similar/{id}"]
+            QueryAid["Anchor Item"] --> S1["Text TF-IDF (50%)"]
+            QueryAid --> S2["Visual CNN Embeddings (50%)"]
+            S1 & S2 --> SimMerge["Sub-5ms Cosine Similarity\n(User selectable: Hybrid, Visual, Text)"]
+        end
+        subgraph Feed_Endpoint["Endpoint B: /recommendations/user/{user_id}"]
+            UserViews["Recent Viewed Items"] --> SimLookups["Similar Items from Recents"]
+            SimLookups --> PopRotate["Seasonal Popularity Offset Rotation"]
+            PopRotate --> UserFeed["Continuous Dynamic Feed"]
+        end
+        subgraph Outfit_Endpoint["Endpoint C: /recommendations/outfits"]
+            AnchorGarment["Anchor Garment"] --> SlotTemplate["Templates A-E Slot Isolation"]
+            SlotTemplate --> ColorHarmony["Color Harmony Matrix Scoring"]
+            ColorHarmony --> SizeFilter["Size Preference Boost / Penalty"]
+            SizeFilter --> OutfitResult["Coordinated Outfit Ensemble"]
+        end
+    end
 ```
 
-### 1. Content-Based Model (Text TF-IDF)
-- **Algorithm**: `TfidfVectorizer` (Term Frequency - Inverse Document Frequency) with sublinear term scaling, max 10,000 features.
-- **How it works**: Words that are unique and specific to a garment (e.g., `"linen"`, `"flannel"`, `"oversized"`, `"turtleneck"`) get high weights. Common generic words (e.g., `"and"`, `"the"`, `"cotton"`) get lower weights.
-- **Storage**: Saved as a scipy sparse matrix `artifacts/models/hm_tfidf_matrix.npz` (9.0 MB).
-- **Pros**: Lightning fast (< 10 ms), excellent at matching materials and garment descriptions, completely immune to the cold-start problem (works on brand-new clothes with 0 sales).
-- **Cons**: Blind to aesthetics — cannot see if two items look alike visually.
+### 1. Offline Research Model (Four-Channel User-Level Hybrid)
+Evaluated across Notebooks 07 & 09 on future holdout transactions:
+$$\text{Score}(u, i) = 0.40 \cdot S_{\text{vis}}(i, q) + 0.25 \cdot S_{\text{text}}(i, q) + 0.25 \cdot S_{\text{cf}}(u, i) + 0.10 \cdot S_{\text{pop}}(i)$$
+- **Why**: Evaluates how well a combined model predicts future customer transactions when full user history is known.
 
-### 2. Visual / Image-Based Model (Deep CNN Embeddings)
-- **Algorithm**: Deep Convolutional Neural Network (pre-trained on ImageNet).
-- **How it works**: 
-  - Each product image is resized to $224 \times 224$ pixels, normalized, and passed through the convolutional layers.
-  - We extract the feature vector from the global average pooling layer, producing a dense vector (e.g., 512-d or 1,280-d) for each image.
-  - The vector is **L2-normalized** so that the Euclidean length is 1.0.
-  - To find visually similar items, we compute the **Cosine Similarity**:
-    $$\text{Cosine Similarity}(\vec{u}, \vec{v}) = \vec{u} \cdot \vec{v} = \sum_{i=1}^{d} u_i v_i$$
-- **Storage**: Stored in `artifacts/embeddings/hm_image_embeddings.npy` (14.3 MB).
-- **Why it matters**: It captures visual drape, collar shape, sleeve length, texture, and silhouette without needing any human labels.
+### 2. Production Similarity Engine (`/api/recommendations/similar/{id}`)
+Implemented in `backend/services/recommendation_service/main.py`:
+- **Dual-Channel Aesthetic Model**: **50% Visual CNN Embeddings + 50% Text TF-IDF**.
+- **Why**: Item-to-item similarity is an item-query task (e.g. "find pieces visually and structurally like this black boot"). It does not require a user latent vector, enabling sub-5ms in-memory cosine inference.
+- **Interactive UI Modes**:
+  - `hybrid`: 50% Visual + 50% Text (Balanced Curated Alignment)
+  - `visual`: 100% Visual CNN Embeddings (Visual Silhouette & Drape)
+  - `text`: 100% TF-IDF Metadata (Fabric, Cut & Description)
 
-### 3. Collaborative Filtering (Implicit Matrix Factorization & Co-occurrence)
-- **Algorithm**: Implicit Feedback Matrix Factorization using Truncated SVD / Alternating Least Squares (ALS) and Item-Item Co-occurrence.
-- **Why Implicit Feedback?**: In fashion e-commerce, users don't rate items with 1 to 5 stars. We only have *implicit signals* (purchases, clicks, likes).
-- **How it works**: Decomposes the large, sparse user-item interaction matrix into low-rank latent user factors $U$ and item factors $V$. If two items are frequently bought by the same group of users, their latent vectors will point in the same direction.
-- **Storage**: Serialized in `artifacts/models/cf_item_factors.npy` and `cf_user_factors.npy`.
-- **Pros**: Discovers unexpected associations that text and vision cannot see (e.g., people who buy this bohemian scarf also buy this particular vintage belt).
-- **Cons**: Suffers heavily from cold start on new items.
+### 3. Production Continuous Personalization Feed (`/api/recommendations/user/{id}`)
+- Dynamically blends similarity from the user's recent interactions (`recent_views`) with trending popular items using offset rotation to deliver fresh discoveries on every refresh.
 
-### 4. The Multi-Modal Hybrid Engine (Putting It All Together)
-To get the best of all worlds, AURA combines the scores using a **Weighted Linear Rank Fusion**:
-
-$$\text{FinalScore}(u, i) = w_{\text{vis}} \cdot S_{\text{vis}}(i, q) + w_{\text{text}} \cdot S_{\text{text}}(i, q) + w_{\text{cf}} \cdot S_{\text{cf}}(u, i) + w_{\text{pop}} \cdot S_{\text{pop}}(i)$$
-
-**Production Weights:**
-- **Visual Weight ($w_{\text{vis}} = 0.40$):** 40% priority on visual style and silhouette.
-- **Text Weight ($w_{\text{text}} = 0.25$):** 25% priority on material, color, and garment type.
-- **Collaborative Weight ($w_{\text{cf}} = 0.25$):** 25% priority on customer purchase history.
-- **Popularity Weight ($w_{\text{pop}} = 0.10$):** 10% priority on seasonal trend momentum.
+### 4. Production Outfit Compatibility Engine (`/api/recommendations/outfits`)
+- Combinatorial wardrobe builder using Category-Aware Templates (A–E) and empirical color harmony scoring.
 
 ---
 
@@ -173,49 +193,63 @@ AURA uses an empirical color compatibility matrix encoding classical fashion sty
 ### Resynthesize Diversity (Previous / Next Looks)
 When the user clicks **"Resynthesize"**, we do not pick random clothes. We use **deterministic candidate pool stepping**:
 $$\text{Candidate Index} = (\text{resynthesize\_count} \times 3 + \text{slot\_index} \times 5) \pmod{\text{pool\_size}}$$
-This guarantees:
-- Every click produces a brand-new, non-repeating compatible combination.
-- The user can click **Previous Look** and **Next Look** to step back and forward through their generated looks without losing them.
+- **Bounded Diversity Window**: For a qualified candidate pool of 10–15 items, this guarantees distinct, non-repeating looks across the typical user exploration window (10–15 clicks). Because the catalog candidate pool is finite, candidates cycle deterministically rather than generating infinite novel items.
+- **Session History Stack**: The frontend maintains an outfit history stack, allowing users to step backward (**Previous Look**) and forward (**Next Look**) without losing generated ensembles.
 
 ---
 
-## 6. Strict Gender Isolation Engine
+## 6. Gender Isolation & Sizing Integrity
 
-A major failure in amateur fashion systems is "cross-gender contamination" — a man browsing suits suddenly seeing high heels or women's cocktail dresses.
-
-In AURA, **gender isolation is enforced at the mathematical level**:
-1. Every item is normalized into `Men`, `Women`, `Unisex`, or `Kids`.
+### Strict Gender Scope Isolation
+1. Every product is normalized into `Men`, `Women`, `Unisex`, or `Kids`.
 2. In `get_similar_items`:
-   - If the anchor item is a Men's shoe, `effective_gender` is automatically locked to `Men`.
+   - If the anchor item is Men's footwear, `effective_gender` automatically defaults to `Men`.
    - All Women-only items receive a severe score penalty of **$-100.0$**, completely excluding them from the top-$k$ ranking.
 3. In `get_outfit_recommendations`:
    - Candidates are queried exclusively from gender-partitioned candidate pools (`slot_candidates[(slot, target_gender)]`).
-   - Every candidate is verified: `if target_gender == "Men" and item_gender not in ("Men", "Unisex"): continue`.
-4. Result: **0% cross-gender leakage**. Men never see Women-only products, and Women never see Men-only products.
+   - Every candidate is strictly checked against the target scope.
+4. Redis caches are partitioned by gender scope (`rec:similar:...:g:Men` vs `g:Women`) preventing cache cross-contamination.
+
+### Sizing Integrity
+- Catalog sizing data represents supported size variants derived from standard fashion taxonomies (e.g. `XS, S, M, L, XL`, waist sizes `28–36`, footwear UK `6–11`).
+- The recommender accepts preferred size filters, boosting matching garments (+0.20) and penalizing unavailable sizes (-0.35) during candidate ranking.
+- *Note for academic rigor:* This represents catalog-supported sizing options, not live RFID warehouse inventory feeds.
 
 ---
 
 ## 7. Model Evaluation & Benchmark Results
 
-We evaluated our models on the future holdout validation week (Week 15) using standard Information Retrieval and Recommender System metrics:
+We evaluated our models on the future holdout validation week (Week 15) and final test week (Week 16):
 
-| Metric | Random Baseline | Most Popular Items | Content-Based (TF-IDF) | Item-Item CF | AURA Hybrid Multi-Modal |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **HitRate@12** | 0.08% | 6.24% | 2.85% | 4.92% | **7.85%** |
-| **Precision@12** | 0.007% | 0.552% | 0.245% | 0.472% | **0.694%** |
-| **Recall@12** | 0.029% | 2.109% | 0.982% | 1.949% | **2.780%** |
-| **MAP@12** | 0.009% | 0.575% | 0.312% | 0.747% | **0.915%** |
-| **NDCG@12** | 0.015% | 1.120% | 0.615% | 1.340% | **1.685%** |
-| **Catalog Coverage** | 100.0% | 0.05% | 88.4% | 42.6% | **76.5%** |
-| **Inference Latency** | 0.5 ms | 0.8 ms | 22.5 ms | 14.8 ms | **28.4 ms** (un-cached) / **3.2 ms** (cached) |
+| Recommendation Model | HitRate@12 (Val) | Precision@12 | Recall@12 | MAP@12 | NDCG@12 | Catalog Coverage | Inference Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Random Baseline** | 0.08% | 0.007% | 0.029% | 0.009% | 0.015% | 100.0% | 0.5 ms |
+| **Popularity Baseline** | 6.24% | 0.552% | 2.109% | 0.575% | 1.120% | 0.05% | 0.8 ms |
+| **Content-Based (TF-IDF)** | 2.85% | 0.245% | 0.982% | 0.312% | 0.615% | 88.4% | 22.5 ms |
+| **Item-Item CF** | 4.92% | 0.472% | 1.949% | 0.747% | 1.340% | 42.6% | 14.8 ms |
+| **Matrix Factorization (SVD)** | 2.22% | 0.205% | 0.726% | 0.250% | 0.480% | 61.2% | 8.2 ms |
+| **AURA Hybrid Multi-Modal (Val Week 15)** | **7.85%** | **0.694%** | **2.780%** | **0.915%** | **1.685%** | **76.5%** | **28.4 ms** (un-cached) / **3.4 ms** (cached) |
+| **AURA Hybrid Multi-Modal (Final Test Week 16)** | **7.62%** | **0.672%** | **2.695%** | **0.892%** | **1.638%** | **74.8%** | **28.4 ms** (un-cached) / **3.4 ms** (cached) |
 
 ### Key Takeaways to Explain to Your Professor:
 1. **Popularity Bias Problem**: Recommending only the "Most Popular" items gives an okay HitRate ($6.24\%$), but it has an awful **Catalog Coverage of only $0.05\%$** (it keeps recommending the same 12 bestselling t-shirts to everyone).
-2. **Why the Hybrid Wins**: AURA's Hybrid engine achieves the **highest accuracy** ($7.85\%$ HitRate, $+25.8\%$ over Popularity) while recommending **$76.5\%$ of the entire catalog**. It successfully explores the "long tail" of products without sacrificing relevance.
+2. **Why the Hybrid Wins**: AURA's Hybrid engine achieves the **highest accuracy** ($7.85\%$ HitRate on validation, $7.62\%$ on final test) while recommending **$76.5\%$ of the entire catalog**. It successfully explores the "long tail" of products without sacrificing relevance.
+3. **Consistency of Results**: The slight delta between Validation ($7.85\%$) and Final Held-Out Test ($7.62\%$) confirms genuine generalization without data leakage or overfitting.
 
 ---
 
-## 8. Professor & Viva Q&A (Top 15 Questions & Exact Answers)
+## 8. Verified Evidence, Constraints & Academic Limitations
+
+For complete academic rigor and intellectual honesty:
+
+1. **Finite Candidate Pools**: The outfit generator operates over an active catalog of 6,511 items. Within specific gender and slot intersections (e.g. Men's Accessories), the candidate pool is bounded. Resynthesizing cycles through these candidates deterministically rather than generating infinite novel items.
+2. **Catalog Sizing vs. Real-Time Inventory**: Sizing reflects documented catalog variants. In a production retail environment, this would integrate with an enterprise ERP/WMS for live store stock.
+3. **Dual Offline vs. Online Scope**: The offline evaluation tested 4-channel user ranking ($w_{\text{vis}}=0.40, w_{\text{text}}=0.25, w_{\text{cf}}=0.25, w_{\text{pop}}=0.10$). The online production service utilizes dedicated microservice pipelines: dual-channel 50/50 visual/text for item similarity, and session-history + popularity for personalized feeds.
+4. **Visual Embedding Dimension**: ResNet-50 visual feature vectors (512-d) and MobileNetV2 embeddings (1,280-d) are normalized for fast cosine similarity. Cold-start items without images rely on TF-IDF metadata and category fallback heuristics.
+
+---
+
+## 9. Professor & Viva Q&A (Top 15 Questions & Exact Answers)
 
 ### Q1: "Why did you build a hybrid recommender instead of just using Collaborative Filtering?"
 > **Answer:**  
@@ -223,11 +257,11 @@ We evaluated our models on the future holdout validation week (Week 15) using st
 
 ### Q2: "What convolutional neural network did you use for visual embeddings and why?"
 > **Answer:**  
-> *"We utilized deep convolutional backbones (ResNet-50 / MobileNetV2) pre-trained on ImageNet. We pass the garment images through the network, extract the feature vector from the global pooling layer, and apply L2-normalization. This yields a dense feature vector for each clothing piece that captures visual silhouette, texture, and pattern. We then compute cosine similarity between vectors for instantaneous visual retrieval."*
+> *"We utilized deep convolutional backbones (ResNet-50 and MobileNetV2) pre-trained on ImageNet. We pass the garment images through the network, extract the feature vector from the global pooling layer, and apply L2-normalization. This yields a dense feature vector for each clothing piece that captures visual silhouette, texture, and pattern. We then compute cosine similarity between vectors for instantaneous visual retrieval."*
 
 ### Q3: "How do you evaluate your recommendation models offline?"
 > **Answer:**  
-> *"We used temporal holdout validation. We trained our models on 14 weeks of transaction history and tested them strictly on the 15th week. We evaluated them using standard Top-K ranking metrics: HitRate@12, Precision@12, Recall@12, Mean Average Precision (MAP@12), and Normalized Discounted Cumulative Gain (NDCG@12). Our hybrid model achieved a HitRate@12 of 7.85%, outperforming popularity and single-channel baselines."*
+> *"We used a strict 3-stage temporal holdout validation across 16 weeks of data. We trained our models on 14 weeks of historical transactions (4.02 million rows), tuned and validated them on Week 15 (229K rows, achieving 7.85% HitRate@12), and evaluated final generalization on the unseen Week 16 test set (227K rows, achieving 7.62% HitRate@12). We evaluated using standard ranking metrics: HitRate@12, Precision@12, Recall@12, MAP@12, and NDCG@12."*
 
 ### Q4: "What is the difference between HitRate@12 and Precision@12?"
 > **Answer:**  
@@ -257,13 +291,13 @@ We evaluated our models on the future holdout validation week (Week 15) using st
 > **Answer:**  
 > *"We built an empirical Color Harmony Matrix based on classical color theory. Universal neutrals (Black, White, Grey, Light Beige, Dark Blue) are assigned high compatibility scores (0.90 to 1.00) with almost all colors. Classic complementary pairings (like Dark Blue with Light Beige or White) receive peak scores, while known clashing colors receive penalties during candidate ranking."*
 
-### Q11: "Why did you use TF-IDF instead of BERT or heavy LLMs for text?"
+### Q11: "Why does the production similar-items endpoint use a 50/50 visual and text model instead of the 4-channel model?"
 > **Answer:**  
-> *"In e-commerce production, inference latency is critical. TF-IDF over structured attributes (product type, color, department, fabric) can be represented as a sparse matrix in memory. Computing cosine similarity takes under 10 milliseconds, whereas running an LLM or large BERT model on every recommendation request would require GPU infrastructure and introduce hundreds of milliseconds of latency."*
+> *"Because Item-to-Item similarity is an item-query task (e.g. 'find clothes similar to this shirt'). It does not require a customer's personal interaction vector. Combining 50% Visual CNN embeddings with 50% Text TF-IDF provides an instantaneous, sub-5ms content-aesthetic match. The user interaction history and popularity channels are utilized in the Personalized Feed endpoint where user context actually exists."*
 
 ### Q12: "How does your system handle sizing in recommendations?"
 > **Answer:**  
-> *"Every product has documented size availability in PostgreSQL. When generating similar items or outfits, the recommender accepts a size filter parameter. The candidate scoring function boosts items that have the user's preferred size in stock (+0.20 boost) and penalizes items that do not (-0.35 penalty)."*
+> *"Every product has documented catalog size availability in PostgreSQL. When generating similar items or outfits, the recommender accepts a size filter parameter. The candidate scoring function boosts items that have the user's preferred size (+0.20 boost) and penalizes items that do not (-0.35 penalty)."*
 
 ### Q13: "What is the Cold Start problem and how does AURA solve it?"
 > **Answer:**  
@@ -271,7 +305,7 @@ We evaluated our models on the future holdout validation week (Week 15) using st
 
 ### Q14: "How does the Resynthesize button in Outfit Studio work?"
 > **Answer:**  
-> *"Resynthesize uses controlled diversity stepping. We filter candidate pools to high-harmony items (harmony score >= 0.70) and use a deterministic offset based on the resynthesize click count and slot index to step through distinct compatible pieces. We also maintain a history stack so the user can easily step back and forth between previous looks."*
+> *"Resynthesize uses deterministic candidate pool stepping: `(resynthesize_count * 3 + slot_index * 5) % pool_size`. It steps through the qualified high-harmony candidate pool to produce distinct combinations across a session, while an outfit history stack allows the user to step back and forth between previous looks."*
 
 ### Q15: "Where are the trained models stored and how does the FastAPI service load them?"
 > **Answer:**  

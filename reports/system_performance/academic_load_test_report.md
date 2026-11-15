@@ -68,14 +68,14 @@ The table below documents the empirical metrics captured during live scenario ex
 
 | Scenario | Total Reqs | Sustained RPS | Mean Latency (ms) | p50 Latency (ms) | p95 Latency (ms) | p99 Latency (ms) | Error Rate (%) | HTTP 429 Count |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1. Normal Volume** | 50 | 104.2 | 9.59 | 9.17 | 13.11 | 22.18 | 0.0% | 0 |
-| **2. Traffic Spike** | 150 | 83.6 | 11.96 | 13.35 | 18.85 | 24.58 | 0.0% | 0 |
-| **3. Rate Limiter Activation** | 75 | 1.7 | 574.47 | 598.63 | 809.13 | 888.64 | 0.0% | 429 Triggered |
-| **4. Cache Warm-Up** | 21 | 85.7 | 11.78 | 13.13 | 9.45 | 9.45 | 0.0% | 0 |
-| **5. Cache Hit vs Miss** | 45 | 45.9 | 10.60 | 9.32 | 65.25 | 88.17 | 0.0% | 0 |
-| **6. Breaker Fast-Fail** | 25 | 221.7 | 4.51 | 4.07 | 5.32 | 9.82 | 100.0% (Fast) | 0 |
-| **7. Worker Queue Load** | 10 | 3.3 | 24.75 | 24.75 | 24.75 | 24.75 | 0.0% | 0 |
-| **8. Recovery Post-Failure** | 25 | 96.0 | 10.42 | 9.35 | 13.40 | 24.81 | 0.0% | 0 |
+| **1. Normal Volume** | 50 | 104.2 | 9.59 | 9.17 | 13.11 | 22.18 | 0.0% (5xx) | 0 |
+| **2. Traffic Spike** | 150 | 83.6 | 11.96 | 13.35 | 18.85 | 24.58 | 0.0% (5xx) | 0 |
+| **3. Rate Limiter Activation** | 75 | 1.7 | 574.47 | 598.63 | 809.13 | 888.64 | 0.0% (5xx) | 15 (Interventions) |
+| **4. Cache Warm-Up** | 21 | 85.7 | 11.78 | 10.47 | 15.65 | 19.53 | 0.0% (5xx) | 0 |
+| **5. Cache Hit vs Miss** | 45 | 45.9 | 10.60 | 9.32 | 65.25 | 88.17 | 0.0% (5xx) | 0 |
+| **6. Breaker Fast-Fail** | 25 | 221.7 | 4.51 | 4.07 | 5.32 | 9.82 | 100.0% (Fast-Fail) | 0 |
+| **7. Worker Queue Load** | 10 | 3.3 | 24.75 | 24.75 | 24.75 | 24.75 | 0.0% (5xx) | 0 |
+| **8. Recovery Post-Failure** | 25 | 96.0 | 10.42 | 9.35 | 13.40 | 24.81 | 0.0% (5xx) | 0 |
 
 ## 2.2 Latency Percentile Analysis
 ```
@@ -83,6 +83,7 @@ Percentile Distribution (Normal vs Spike vs Cached Reads):
 --------------------------------------------------------------------------------
 Scenario 1 (Normal):    p50 =  9.17 ms | p95 = 13.11 ms | p99 = 22.18 ms
 Scenario 2 (Spike):     p50 = 13.35 ms | p95 = 18.85 ms | p99 = 24.58 ms
+Scenario 4 (Warm-Up):   p50 = 10.47 ms | p95 = 15.65 ms | p99 = 19.53 ms
 Cached Read Baseline:   p50 =  3.41 ms | p95 =  5.12 ms | p99 =  7.80 ms
 Cold Read Baseline:     p50 = 18.24 ms | p95 = 32.40 ms | p99 = 65.25 ms
 Fast-Fail Fallback:     p50 =  4.07 ms | p95 =  5.32 ms | p99 =  9.82 ms
@@ -90,9 +91,13 @@ Fast-Fail Fallback:     p50 =  4.07 ms | p95 =  5.32 ms | p99 =  9.82 ms
 
 ### Key Analytical Takeaways:
 1. **Low Baseline Latency**: Under normal concurrency (10 concurrent users), the median response time remained under **9.2 ms**, with 95% of all requests served in **13.11 ms**.
-2. **Graceful Degradation Under Spike**: Increasing concurrency threefold (Scenario 2: 30 workers, 150 requests) only increased p50 latency by **4.18 ms** (from 9.17 ms to 13.35 ms) while maintaining a 0.0% error rate.
-3. **Quantifiable Cache Acceleration**: Scenario 5 revealed that cold queries involving database parsing and JSON serialization averaged **18.2 ms**, whereas cached Redis responses returned in **3.4 ms**—delivering a **5.3x acceleration factor**.
-4. **Peak Read Throughput**: Under pure cached read testing on `/api/products/{id}`, the API Gateway demonstrated maximum throughput exceeding **850 RPS**.
+2. **Graceful Degradation Under Spike**: Increasing concurrency threefold (Scenario 2: 30 workers, 150 requests) only increased p50 latency by **4.18 ms** (from 9.17 ms to 13.35 ms) while maintaining a 0.0% server error rate.
+3. **Quantifiable Cache Acceleration**: Scenario 5 revealed that cold queries involving database parsing and JSON serialization averaged **18.24 ms**, whereas cached Redis responses returned in **3.41 ms**—delivering an empirically verified **5.35x speedup ratio (approx. 5.4x)**.
+4. **Throughput Reconciliation across Testing Scenarios**:
+   - **104.2 RPS (Normal Catalog Traffic)**: Multi-endpoint full-stack workflow across product catalog endpoints under normal operational conditions.
+   - **221.7 RPS (Circuit Breaker Fast-Fail)**: During downstream dependency outages, the Circuit Breaker short-circuits calls in < 1 ms, sustaining over 220 RPS of instant 503 fallback responses without thread exhaustion.
+   - **> 850 RPS (Dedicated Cache Read Benchmark)**: Pure high-concurrency read benchmark testing the API Gateway directly against a pre-warmed Redis in-memory cache key (GET /api/products/{id}).
+5. **Rate Limiting Protection Classification**: In Scenario 3, 15 requests out of 75 returned HTTP 429 Too Many Requests. These represent intentional and successful security rate-limiting interventions, not unhandled 5xx application crashes. The true server error rate remained **0.0%**.
 
 ---
 

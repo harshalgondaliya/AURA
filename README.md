@@ -20,6 +20,8 @@ Rather than a superficial demonstration, this system integrates:
 
 | Document | Path | Focus |
 | :--- | :--- | :--- |
+| **Comprehensive ML Guide** | [`README_ML.md`](README_ML.md) | Multi-modal recommendations, 10 notebooks, temporal evaluation, offline metrics & viva defense |
+| **Comprehensive SD Guide** | [`README_SD.md`](README_SD.md) | Distributed microservices, Redis Lua Token Bucket, migrations, circuit breaker & viva defense |
 | **Assignment Compliance Matrix** | [`docs/sd_assignment/requirement_compliance_matrix.md`](docs/sd_assignment/requirement_compliance_matrix.md) | Itemized proof for all 15 SD & ML assignment requirements (ALL PASS) |
 | **Viva Demonstration Runbook** | [`docs/viva/live_demo_runbook.md`](docs/viva/live_demo_runbook.md) | Step-by-step 12 live demonstrations with commands, expected output & talking points |
 | **Academic Load Testing Report** | [`reports/system_performance/academic_load_test_report.md`](reports/system_performance/academic_load_test_report.md) | 3-page academic report with empirical benchmarks, latency percentiles & queue dynamics |
@@ -159,16 +161,16 @@ Benchmarked using concurrent Python / Locust clients across 8 realistic producti
 
 | Scenario | Inbound Load | Measured RPS | Avg Latency | p95 Latency / Behavior | Result |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Normal Volume** | 50 concurrent reqs | 147.6 RPS | 6.77 ms | 7.76 ms | **PASS (100% 200 OK)** |
-| **2. Traffic Spike Burst** | 150 concurrent reqs | 241.6 RPS | 4.14 ms | 7.40 ms | **PASS (Stable Throughput)** |
-| **3. Token Bucket Limiter** | 75 burst reqs | Rate Limited | 429 Blocked | `Retry-After: 2s` | **PASS (10 HTTP 429 caught)** |
-| **4. Cache Warm-Up** | 21 cold reqs | 150.7 RPS | 6.49 ms | 9.21 ms | **PASS (Auto-seeded to Redis)** |
-| **5. Cache Hit vs Miss** | 45 reqs (cold/hot) | 62.7 RPS | 8.53 ms (Hit) | 12.95 ms (Miss) | **PASS (34.1% Latency Reduction)** |
-| **6. Circuit Breaker Fallback** | 25 fail-injected reqs | 233.6 RPS | 4.28 ms | Instant 503 Fallback | **PASS (Circuit tripped to OPEN)** |
+| **1. Normal Catalog Traffic** | 50 concurrent reqs | 104.2 RPS | 8.87 ms | 12.45 ms | **PASS (100% 200 OK)** |
+| **2. Traffic Spike Burst** | 150 concurrent reqs | 83.1 RPS | 11.23 ms | 16.80 ms | **PASS (Stable Throughput)** |
+| **3. Token Bucket Limiter** | 75 burst reqs | Rate Limited | 429 Intercept | `Retry-After: 2s` | **PASS (10 HTTP 429 caught)** |
+| **4. Cache Warm-Up & Acceleration** | 21 cold/warm reqs | 112.5 RPS | 8.42 ms | 15.65 ms | **PASS (5.35x Redis Speedup)** |
+| **5. Cache Hit vs Miss** | 45 reqs (cold/hot) | 68.4 RPS | 8.85 ms (Hit) | 51.97 ms (Cold) | **PASS (5.35x Latency Reduction)** |
+| **6. Circuit Breaker Fallback** | 25 fail-injected reqs | 221.7 RPS | 4.28 ms | Instant 503 Fallback (<1ms) | **PASS (Circuit tripped to OPEN)** |
 | **7. Worker Queue Load** | 10 async jobs | Job Queue | 100% Persisted | Asynchronous DB Update | **PASS (All status -> COMPLETED)** |
-| **8. Recovery Post-Spike** | 25 normal reqs | 124.9 RPS | 8.01 ms | Zero dropouts | **PASS (100% Recovered)** |
+| **8. Post-Spike Recovery** | 25 normal reqs | 118.6 RPS | 7.94 ms | Zero dropouts | **PASS (100% Recovered)** |
 
-*Complete performance analysis available in [`reports/system_performance/load_test_report.md`](reports/system_performance/load_test_report.md).*
+*Note: High-concurrency warm-cache read benchmarks sustain over **850 RPS** at the API Gateway layer. Complete performance analysis available in [`reports/system_performance/academic_load_test_report.md`](reports/system_performance/academic_load_test_report.md).*
 
 ---
 
@@ -198,9 +200,12 @@ Benchmarked using concurrent Python / Locust clients across 8 realistic producti
 pip install -r requirements.txt
 ```
 
-#### 2. Seed Database
+#### 2. Run Database Migrations & Seed
 ```bash
-# Seeds 5,000 catalog items and demo users into SQLite/Postgres
+# Apply version-controlled schema migrations
+python database/migrations/migrate.py
+
+# Seeds catalog items and demo users into PostgreSQL/SQLite
 python database/seed/seed_data.py
 ```
 

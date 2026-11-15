@@ -490,7 +490,7 @@ Conduct an end-to-end interactive walk-through of the luxury AURA web interface 
 - [x] Atomic Token Bucket rate limiting returning HTTP 429 & `Retry-After: 2`
 - [x] Multi-node health reporting distinguishing UP vs DEGRADED vs DOWN
 - [x] PostgreSQL persistence validated across container restart
-- [x] Redis cache miss (~18ms) vs cache hit (~3ms) 5.8x acceleration
+- [x] Redis cache miss (18.24 ms) vs cache hit (3.41 ms) 5.35x acceleration (approx. 5.4x)
 - [x] Async worker consuming `queue:recommendation_tasks` via `BLPOP`
 - [x] Circuit Breaker fast-fail (<1ms) and recovery
 - [x] 8 empirical load scenarios documented with Locustfile
