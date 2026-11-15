@@ -41,6 +41,7 @@ class Product(Base):
     department_name = Column(String(64), nullable=True)
     index_name = Column(String(64), nullable=True)
     section_name = Column(String(64), nullable=True)
+    gender = Column(String(32), default="Unisex", index=True)
     detail_desc = Column(Text, nullable=True)
     price_cents = Column(Integer, default=2999)
     image_path = Column(String(255), nullable=True)

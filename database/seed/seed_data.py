@@ -62,6 +62,22 @@ def seed_database(limit_products: int = 5000):
         # Batch insert
         products_to_add = []
         for _, row in sample_df.iterrows():
+            ig = str(row.get("index_group_name", "")).strip()
+            idx = str(row.get("index_name", "")).strip()
+            sec = str(row.get("section_name", "")).strip()
+            if ig == 'Baby/Children' or 'children' in idx.lower() or 'baby' in idx.lower():
+                g = 'Kids'
+            elif ig == 'Menswear' or 'men ' in sec.lower() or 'menswear' in idx.lower() or sec.lower().startswith('men'):
+                g = 'Men'
+            elif ig == 'Ladieswear' or 'ladies' in idx.lower() or 'lingeries' in idx.lower() or 'ladies' in sec.lower():
+                g = 'Women'
+            elif ig == 'Sport' or idx == 'Sport':
+                g = 'Unisex'
+            elif ig == 'Divided':
+                g = 'Men' if 'men' in sec.lower() else 'Women'
+            else:
+                g = 'Unisex'
+
             prod = Product(
                 article_id=str(row["article_id"]),
                 prod_name=str(row["prod_name"]),
@@ -70,6 +86,10 @@ def seed_database(limit_products: int = 5000):
                 standard_category=str(row["standard_category"]),
                 colour_group_name=str(row["colour_group_name"]),
                 perceived_colour_value_name=str(row.get("perceived_colour_value_name", "")),
+                department_name=str(row.get("department_name", "")),
+                index_name=idx,
+                section_name=sec,
+                gender=g,
                 detail_desc=str(row.get("detail_desc_clean", "")),
                 price_cents=2999,
                 image_path=str(row.get("image_path", "")),

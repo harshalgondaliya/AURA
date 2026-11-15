@@ -33,6 +33,26 @@ ARTIFACTS_EMBEDDINGS_DIR = PROJECT_ROOT / "artifacts" / "embeddings"
 
 # 1. Catalog Metadata
 df_articles = pd.read_parquet(DATA_PROCESSED_DIR / "hm_articles_cleaned.parquet")
+
+def classify_gender(row):
+    ig = str(row.get('index_group_name', '')).strip()
+    idx = str(row.get('index_name', '')).strip()
+    sec = str(row.get('section_name', '')).strip()
+    if ig == 'Baby/Children' or 'children' in idx.lower() or 'baby' in idx.lower():
+        return 'Kids'
+    if ig == 'Menswear' or 'men ' in sec.lower() or 'menswear' in idx.lower() or sec.lower().startswith('men'):
+        return 'Men'
+    if ig == 'Ladieswear' or 'ladies' in idx.lower() or 'lingeries' in idx.lower() or 'ladies' in sec.lower():
+        return 'Women'
+    if ig == 'Sport' or idx == 'Sport':
+        return 'Unisex'
+    if ig == 'Divided':
+        if 'men' in sec.lower():
+            return 'Men'
+        return 'Women'
+    return 'Unisex'
+
+df_articles['normalized_gender'] = df_articles.apply(classify_gender, axis=1)
 article_meta = df_articles.set_index("article_id").to_dict("index")
 all_articles = list(article_meta.keys())
 aid2idx = {aid: idx for idx, aid in enumerate(df_articles["article_id"])}
@@ -56,15 +76,15 @@ if (ARTIFACTS_EMBEDDINGS_DIR / "hm_image_embeddings.npy").exists():
 df_train = pd.read_parquet(DATA_PROCESSED_DIR / "transactions_train_14w.parquet")
 popular_articles = df_train["article_id"].value_counts().head(50).index.tolist()
 
-# 5. Slot candidates for outfits
+# 5. Slot candidates partitioned by slot and gender scope
 slot_candidates = {}
 for slot in ["upper_body", "lower_body", "full_body", "shoes", "accessories"]:
-    slot_candidates[slot] = df_articles[
-        (df_articles["standard_category"] == slot) & 
-        (df_articles["has_image"] == 1)
-    ]["article_id"].tolist()
+    slot_df = df_articles[(df_articles["standard_category"] == slot) & (df_articles["has_image"] == 1)]
+    slot_candidates[(slot, "all")] = slot_df["article_id"].tolist()
+    slot_candidates[(slot, "Men")] = slot_df[slot_df["normalized_gender"].isin(["Men", "Unisex"])]["article_id"].tolist()
+    slot_candidates[(slot, "Women")] = slot_df[slot_df["normalized_gender"].isin(["Women", "Unisex"])]["article_id"].tolist()
 
-print("[REC SERVICE] ML Models and Indexes Ready!")
+print("[REC SERVICE] ML Models, Indexes and Gender-Aware Slot Partitions Ready!")
 
 # --- Recommendation Helpers ---
 def format_item(aid: str, score: float = 1.0) -> dict:
@@ -79,6 +99,7 @@ def format_item(aid: str, score: float = 1.0) -> dict:
         "product_group_name": "Garment" if pd.isna(meta.get("product_group_name")) else str(meta.get("product_group_name")),
         "colour_group_name": "Multi" if pd.isna(meta.get("colour_group_name")) else str(meta.get("colour_group_name")),
         "standard_category": "other" if pd.isna(meta.get("standard_category")) else str(meta.get("standard_category")),
+        "gender": str(meta.get("normalized_gender", "Unisex")),
         "price_cents": 2999,
         "image_path": str(img_path),
         "has_image": bool(meta.get("has_image", 1)),
@@ -129,10 +150,11 @@ def get_similar_items(
     article_id: str,
     top_k: int = Query(default=6, ge=1, le=24),
     mode: str = Query(default="hybrid", pattern="^(hybrid|visual|text)$"),
-    filter_category: bool = Query(default=True)
+    filter_category: bool = Query(default=True),
+    gender: Optional[str] = Query(default=None)
 ):
-    """Feature A: Recommend Similar Clothing Items with strict slot category integrity."""
-    cache_key = f"rec:similar:{article_id}:k{top_k}:m{mode}:fc{filter_category}"
+    """Feature A: Recommend Similar Clothing Items with slot and gender integrity."""
+    cache_key = f"rec:similar:{article_id}:k{top_k}:m{mode}:fc{filter_category}:g{gender}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -170,8 +192,17 @@ def get_similar_items(
     # 3. Category slot integrity: enforce slot category consistency to eliminate cross-category contamination
     if filter_category and anchor_cat and anchor_cat != "other":
         cat_mask = (df_articles["standard_category"] == anchor_cat).values
-        # Garments of matching category keep full score; different categories are penalized
         scores = np.where(cat_mask, scores, scores - 10.0)
+
+    # 4. Gender scope filtering
+    if gender:
+        g_lower = gender.lower().strip()
+        if g_lower == "men":
+            gender_mask = df_articles["normalized_gender"].isin(["Men", "Unisex"]).values
+            scores = np.where(gender_mask, scores, scores - 15.0)
+        elif g_lower == "women":
+            gender_mask = df_articles["normalized_gender"].isin(["Women", "Unisex"]).values
+            scores = np.where(gender_mask, scores, scores - 15.0)
 
     top_indices = np.argsort(scores)[::-1][:top_k]
     valid_indices = [i for i in top_indices if scores[i] > -5.0]
@@ -184,20 +215,33 @@ def get_similar_items(
 def get_outfit_recommendations(
     payload: Dict[str, Any] = Body(...)
 ):
-    """Feature B: Complete Outfit Recommendation (Slot Matching + Color Harmony)."""
+    """Feature B: Complete Outfit Recommendation with Gender Scope, Color Harmony & Resynthesize Diversity."""
     anchor_id = str(payload.get("anchor_article_id", popular_articles[0]))
     if anchor_id not in article_meta:
         anchor_id = popular_articles[0]
 
-    cache_key = f"rec:outfit:{anchor_id}"
+    anchor_meta = article_meta[anchor_id]
+    anchor_slot = anchor_meta.get("standard_category", "upper_body")
+    anchor_color = anchor_meta.get("colour_group_name", "Black")
+    anchor_gender = anchor_meta.get("normalized_gender", "Women")
+
+    # Scope gender: explicit payload scope > anchor item gender > Women
+    requested_gender = payload.get("gender")
+    if requested_gender and str(requested_gender).lower().strip() in ("men", "women"):
+        target_gender = str(requested_gender).capitalize().strip()
+    else:
+        target_gender = "Men" if anchor_gender == "Men" else "Women"
+
+    exclude_ids = set(str(x) for x in payload.get("exclude_ids", []))
+    exclude_ids.add(anchor_id)
+    resynthesize_count = int(payload.get("resynthesize_count", 0))
+
+    cache_key = f"rec:outfit:{anchor_id}:g{target_gender}:r{resynthesize_count}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
 
-    anchor_meta = article_meta[anchor_id]
-    anchor_slot = anchor_meta.get("standard_category", "upper_body")
-    anchor_color = anchor_meta.get("colour_group_name", "Black")
-
+    # Structural slot constraints (Section 6: Configurable composition)
     if anchor_slot == "upper_body":
         needed_slots = ["lower_body", "shoes", "accessories"]
     elif anchor_slot == "lower_body":
@@ -208,38 +252,63 @@ def get_outfit_recommendations(
         needed_slots = ["upper_body", "lower_body", "shoes"]
 
     outfit_slots = {}
-    for slot in needed_slots:
-        # Strictly select candidates belonging to this specific category slot
-        candidates = slot_candidates.get(slot)
-        if not candidates:
-            # Fallback within slot
-            slot_df = df_articles[df_articles["standard_category"] == slot]
-            candidates = slot_df["article_id"].tolist() if len(slot_df) > 0 else popular_articles
+    chosen_aids_in_outfit = set()
+    total_harmony = 0.0
 
-        # Score candidates by color harmony
-        best_candidate = None
-        best_score = -1.0
-        for cid in candidates[:50]:
+    for slot_idx, slot in enumerate(needed_slots):
+        # 1. Retrieve gender-partitioned candidates for this slot
+        candidates = slot_candidates.get((slot, target_gender))
+        if not candidates:
+            candidates = slot_candidates.get((slot, "all"), popular_articles)
+
+        # 2. Score candidates by color harmony with anchor
+        scored_candidates = []
+        for cid in candidates[:150]:
+            if cid in chosen_aids_in_outfit or cid == anchor_id:
+                continue
             cmeta = article_meta.get(cid, {})
-            # Verify slot match
             if cmeta.get("standard_category") != slot:
                 continue
-            score = color_harmony(anchor_color, cmeta.get("colour_group_name", "Black"))
-            if score > best_score:
-                best_score = score
-                best_candidate = cid
-                
-        pick = best_candidate or candidates[0]
-        pmeta = article_meta.get(pick, {})
+            
+            base_score = color_harmony(anchor_color, cmeta.get("colour_group_name", "Black"))
+            # Apply severe penalty if product was already displayed in recent session history
+            adjusted_score = base_score - 0.40 if cid in exclude_ids else base_score
+            scored_candidates.append((cid, adjusted_score, base_score))
+
+        # Sort by adjusted compatibility score
+        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # 3. Intelligent Diversity Selection (MMR / Controlled Exploration)
+        if scored_candidates:
+            top_pool = [c for c in scored_candidates if c[1] >= 0.70]
+            if not top_pool:
+                top_pool = scored_candidates[:10]
+            else:
+                top_pool = top_pool[:15]
+
+            # Use deterministic offset based on resynthesize_count and slot_idx to cycle through distinct compatible pieces
+            pick_idx = (resynthesize_count * 3 + slot_idx * 5) % len(top_pool)
+            pick_cid, _, final_score = top_pool[pick_idx]
+        else:
+            pick_cid = candidates[0]
+            final_score = 0.85
+
+        chosen_aids_in_outfit.add(pick_cid)
+        total_harmony += final_score
+
+        pmeta = article_meta.get(pick_cid, {})
         outfit_slots[slot] = OutfitSlotItem(
-            article_id=pick,
+            article_id=pick_cid,
             slot=slot,
             prod_name=pmeta.get("prod_name", "Apparel"),
             product_type_name=pmeta.get("product_type_name", "Garment"),
             colour_group_name=pmeta.get("colour_group_name", "Black"),
+            gender=pmeta.get("normalized_gender", target_gender),
             image_path=pmeta.get("image_path", ""),
-            compatibility_score=round(best_score if best_score > 0 else 0.85, 2)
+            compatibility_score=round(final_score, 2)
         )
+
+    overall_score = round(total_harmony / len(needed_slots), 2) if needed_slots else 0.95
 
     response = OutfitResponse(
         anchor=OutfitSlotItem(
@@ -248,23 +317,26 @@ def get_outfit_recommendations(
             prod_name=anchor_meta.get("prod_name", "Anchor Item"),
             product_type_name=anchor_meta.get("product_type_name", "Garment"),
             colour_group_name=anchor_color,
+            gender=anchor_gender,
             image_path=anchor_meta.get("image_path", ""),
             compatibility_score=1.0
         ),
         slots=outfit_slots,
-        overall_score=0.94
+        overall_score=overall_score
     )
-    cache.set_json(cache_key, response.dict(), ttl_seconds=600)
+
+    cache.set_json(cache_key, response.dict(), ttl_seconds=300)
     return response
 
 @app.get("/recommendations/personalized/{user_id}", response_model=List[ProductResponse])
 def get_personalized_recommendations(
     user_id: str,
     top_k: int = Query(default=10, ge=1, le=30),
+    gender: Optional[str] = Query(default=None),
     recent_views: Optional[str] = Query(default=None) # Comma-separated article_ids
 ):
-    """Features C & D: Continuous Personalization Feed."""
-    cache_key = f"rec:user:{user_id}:k{top_k}:rv{recent_views}"
+    """Features C & D: Continuous Personalization Feed with Gender Scope."""
+    cache_key = f"rec:user:{user_id}:k{top_k}:g{gender}:rv{recent_views}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -275,9 +347,8 @@ def get_personalized_recommendations(
     # If user recently clicked/viewed items, blend recommendations across recent items
     if recent_views:
         recent_aids = [a.strip() for a in recent_views.split(",") if a.strip() in article_meta]
-        # Iterate over up to 3 distinct recent items
         for aid in recent_aids[-3:]:
-            sim_items = get_similar_items(aid, top_k=4, mode="hybrid", filter_category=True)
+            sim_items = get_similar_items(aid, top_k=4, mode="hybrid", filter_category=True, gender=gender)
             for it in sim_items:
                 if it["article_id"] not in seen_aids and it["article_id"] != aid:
                     seen_aids.add(it["article_id"])
@@ -287,10 +358,18 @@ def get_personalized_recommendations(
             if len(results) >= top_k:
                 break
 
-    # Fill remainder with trending popular items across diverse slots
+    # Fill remainder with trending popular items matching gender
     if len(results) < top_k:
         for aid in popular_articles:
-            if aid not in seen_aids:
+            if aid not in seen_aids and aid in article_meta:
+                meta = article_meta[aid]
+                if gender:
+                    g_lower = gender.lower().strip()
+                    item_gender = meta.get("normalized_gender", "Women")
+                    if g_lower == "men" and item_gender not in ("Men", "Unisex"):
+                        continue
+                    elif g_lower == "women" and item_gender not in ("Women", "Unisex"):
+                        continue
                 seen_aids.add(aid)
                 results.append(format_item(aid, 0.85))
             if len(results) >= top_k:

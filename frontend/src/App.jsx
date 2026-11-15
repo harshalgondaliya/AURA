@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import HomepageView from './components/HomepageView';
@@ -11,37 +11,28 @@ import WishlistView from './components/WishlistView';
 import SavedOutfitsView from './components/SavedOutfitsView';
 import SystemArchitectureView from './components/SystemArchitectureView';
 import NotificationToast from './components/NotificationToast';
-import { recordInteraction, fetchUserFavorites } from './services/api';
+import { WishlistProvider, useWishlist } from './context/WishlistContext';
+import { recordInteraction } from './services/api';
 
-export default function App() {
+function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   const [activeTab, setActiveTab] = useState('discover'); // 'discover', 'shop', 'outfits', 'for_you', 'wishlist', 'saved_outfits', 'product', 'similar', 'architecture'
   const [previousTab, setPreviousTab] = useState('discover');
-  const [activeUser, setActiveUser] = useState('user_000001');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [anchorProduct, setAnchorProduct] = useState(null);
   const [recentViewIds, setRecentViewIds] = useState([]);
-  const [wishlistIds, setWishlistIds] = useState([]);
-  const [toast, setToast] = useState(null);
 
-  // Load user wishlist on mount or user switch
-  useEffect(() => {
-    loadWishlist();
-  }, [activeUser]);
+  // Persistent Gender Scope (defaults to 'all', can be 'women' or 'men')
+  const [selectedGender, setSelectedGender] = useState(() => {
+    return localStorage.getItem('aura_catalog_gender') || 'all';
+  });
 
-  const loadWishlist = async () => {
-    try {
-      const favs = await fetchUserFavorites(activeUser);
-      if (Array.isArray(favs)) {
-        setWishlistIds(favs.map((p) => p.article_id));
-      }
-    } catch (err) {
-      console.warn('Could not load user favorites:', err);
-    }
-  };
+  // Centralized Wishlist Store Hook
+  const { wishlistIds, isWishlisted, toggleWishlist, wishlistCount } = useWishlist();
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
+  const handleGenderChange = (gender) => {
+    setSelectedGender(gender);
+    localStorage.setItem('aura_catalog_gender', gender);
   };
 
   const navigateTo = (tab) => {
@@ -85,17 +76,11 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Direct Wishlist Toggle
-  const handleLikeClick = async (product, isLiked) => {
-    const action = isLiked ? 'like' : 'dismiss';
-    await recordInteraction(activeUser, product.article_id, action, { component: 'card' });
+  // Centralized Wishlist Toggle
+  const handleLikeClick = (product, isLiked) => {
+    toggleWishlist(product, isLiked);
     if (isLiked) {
-      setWishlistIds((prev) => [...prev.filter((id) => id !== product.article_id), product.article_id]);
-      showToast(`Added "${product.prod_name}" to your Wishlist.`);
       setRecentViewIds((prev) => [product.article_id, ...prev.filter((id) => id !== product.article_id)].slice(0, 10));
-    } else {
-      setWishlistIds((prev) => prev.filter((id) => id !== product.article_id));
-      showToast(`Removed "${product.prod_name}" from Wishlist.`);
     }
   };
 
@@ -107,7 +92,7 @@ export default function App() {
         setActiveTab={navigateTo}
         activeUser={activeUser}
         setActiveUser={setActiveUser}
-        wishlistCount={wishlistIds.length}
+        wishlistCount={wishlistCount}
         onOpenSearch={() => navigateTo('shop')}
       />
 
@@ -126,10 +111,12 @@ export default function App() {
           />
         )}
 
-        {/* SHOP: The Collection (Full Catalog) */}
+        {/* SHOP: The Collection (Full Catalog with Department Filters) */}
         {activeTab === 'shop' && (
           <CatalogView
             initialCategory={selectedCategory}
+            initialGender={selectedGender}
+            onGenderChange={handleGenderChange}
             onSimilarClick={handleSimilarClick}
             onOutfitClick={handleOutfitClick}
             onLikeClick={handleLikeClick}
@@ -138,7 +125,7 @@ export default function App() {
           />
         )}
 
-        {/* DEDICATED FULL-PAGE PRODUCT DETAIL (Replaces Drawer) */}
+        {/* DEDICATED FULL-PAGE PRODUCT DETAIL */}
         {activeTab === 'product' && selectedProduct && (
           <ProductDetailView
             product={selectedProduct}
@@ -146,11 +133,11 @@ export default function App() {
             onSimilarClick={handleSimilarClick}
             onOutfitClick={handleOutfitClick}
             onLikeClick={handleLikeClick}
-            isLiked={wishlistIds.includes(selectedProduct.article_id)}
+            isLiked={isWishlisted(selectedProduct.article_id)}
           />
         )}
 
-        {/* DEDICATED SIMILAR PIECES VIEW (Replaces Dense Modal) */}
+        {/* DEDICATED SIMILAR PIECES VIEW */}
         {activeTab === 'similar' && selectedProduct && (
           <SimilarView
             product={selectedProduct}
@@ -162,11 +149,12 @@ export default function App() {
           />
         )}
 
-        {/* OUTFIT STUDIO: Interactive Wardrobe Synthesizer */}
+        {/* OUTFIT STUDIO: Interactive Wardrobe Synthesizer with Look History */}
         {activeTab === 'outfits' && (
           <OutfitStudio
             anchorProduct={anchorProduct}
             activeUser={activeUser}
+            globalGender={selectedGender}
             onNavigateCatalog={() => navigateTo('shop')}
             onSelectAnchor={(item) => setAnchorProduct(item)}
             onProductSelect={handleProductSelect}
@@ -178,6 +166,7 @@ export default function App() {
         {activeTab === 'for_you' && (
           <PersonalizedFeed
             activeUser={activeUser}
+            gender={selectedGender}
             onSimilarClick={handleSimilarClick}
             onOutfitClick={handleOutfitClick}
             onLikeClick={handleLikeClick}
@@ -209,7 +198,7 @@ export default function App() {
           />
         )}
 
-        {/* DEDICATED SYSTEM ARCHITECTURE PORTAL (For Evaluators & Project Defense) */}
+        {/* DEDICATED SYSTEM ARCHITECTURE PORTAL */}
         {activeTab === 'architecture' && (
           <SystemArchitectureView
             onBackToShopping={() => navigateTo('discover')}
@@ -223,5 +212,26 @@ export default function App() {
       {/* 4. Luxury Editorial Footer */}
       <Footer onNavigate={navigateTo} />
     </div>
+  );
+}
+
+export default function App() {
+  const [activeUser, setActiveUser] = useState('user_000001');
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+  };
+
+  return (
+    <WishlistProvider activeUser={activeUser} onToast={showToast}>
+      <AppContent
+        activeUser={activeUser}
+        setActiveUser={setActiveUser}
+        toast={toast}
+        setToast={setToast}
+        showToast={showToast}
+      />
+    </WishlistProvider>
   );
 }

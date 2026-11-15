@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Sparkles, Layers, Heart, Share2, Check, ShieldCheck, Tag } from 'lucide-react';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
 import { formatProductPrice } from '../utils/formatters';
+import { useWishlist } from '../context/WishlistContext';
 
 export default function ProductDetailView({
   product,
@@ -13,6 +14,27 @@ export default function ProductDetailView({
 }) {
   const [imageError, setImageError] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Consume centralized WishlistContext with safe fallback
+  let wishlistCtx = null;
+  try {
+    wishlistCtx = useWishlist();
+  } catch {
+    // Rendered outside provider
+  }
+
+  const isSaved = wishlistCtx
+    ? wishlistCtx.isWishlisted(product?.article_id)
+    : isLiked;
+
+  const handleWishlistToggle = () => {
+    if (wishlistCtx) {
+      wishlistCtx.toggleWishlist(product);
+    }
+    if (onLikeClick) {
+      onLikeClick(product, !isSaved);
+    }
+  };
 
   if (!product) return null;
 
@@ -98,7 +120,7 @@ export default function ProductDetailView({
               <span>{product.product_group_name || 'Garment'}</span>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl font-serif font-light text-aura-espresso tracking-tight leading-tight">
+            <h1 className="text-3xl sm:text-5xl font-serif font-normal text-aura-espresso tracking-tight leading-tight">
               {product.prod_name}
             </h1>
 
@@ -117,7 +139,7 @@ export default function ProductDetailView({
             <h3 className="text-[11px] font-mono uppercase tracking-[0.2em] text-aura-muted">
               Design & Silhouette
             </h3>
-            <p className="text-sm font-light text-aura-espresso/90 leading-relaxed bg-white/60 p-5 rounded-2xl border border-aura-espresso/8 shadow-aura-subtle">
+            <p className="text-sm font-normal text-aura-espresso leading-relaxed bg-white/70 p-5 rounded-2xl border border-aura-espresso/8 shadow-aura-subtle">
               {product.detail_desc && product.detail_desc !== 'nan'
                 ? product.detail_desc
                 : `${product.prod_name} tailored from selected fabric in ${product.colour_group_name}. Crafted with balanced proportions for effortless daily layering and versatile wardrobe ensemble pairings.`}
@@ -187,15 +209,15 @@ export default function ProductDetailView({
 
               {/* Wishlist Toggle Button */}
               <button
-                onClick={() => onLikeClick && onLikeClick(product, !isLiked)}
+                onClick={handleWishlistToggle}
                 className={`py-3.5 px-4 rounded-full text-xs font-medium uppercase tracking-wider transition-all flex items-center justify-center gap-2 border ${
-                  isLiked
+                  isSaved
                     ? 'bg-aura-espresso text-aura-champagne border-aura-espresso'
                     : 'bg-white text-aura-espresso border-aura-espresso/20 hover:border-aura-espresso/40'
                 }`}
               >
-                <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-current' : 'stroke-[1.5]'}`} />
-                <span>{isLiked ? 'Saved' : 'Wishlist'}</span>
+                <Heart className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : 'stroke-[1.5]'}`} />
+                <span>{isSaved ? 'Saved' : 'Wishlist'}</span>
               </button>
             </div>
           </div>

@@ -82,8 +82,9 @@ def record_interaction(interaction_in: InteractionCreate, db: Session = Depends(
     db.commit()
     db.refresh(interaction)
 
-    # Invalidate user recommendation cache on new like/save interaction
+    # Invalidate user recommendation & favorites cache on new interaction
     cache.delete(f"rec:user:{interaction_in.user_id}")
+    cache.delete(f"favs:user:{interaction_in.user_id}")
     return interaction
 
 @app.get("/users/{user_id}/history", response_model=List[ProductResponse])
@@ -113,23 +114,75 @@ def get_user_history(
 
 @app.get("/users/{user_id}/favorites", response_model=List[ProductResponse])
 def get_user_favorites(user_id: str, db: Session = Depends(get_db)):
-    """Retrieve products liked by user."""
-    likes = (
+    """Retrieve products currently liked/saved by user, reconciling likes and dismissals."""
+    cache_key = f"favs:user:{user_id}"
+    cached = cache.get_json(cache_key)
+    if cached:
+        return cached
+
+    # Query all like and dismiss interactions ordered by newest first
+    interactions = (
         db.query(UserInteraction)
-        .filter(UserInteraction.user_id == user_id, UserInteraction.interaction_type == "like")
+        .filter(
+            UserInteraction.user_id == user_id,
+            UserInteraction.interaction_type.in_(["like", "dismiss"])
+        )
         .order_by(UserInteraction.created_at.desc())
         .all()
     )
     
     seen = set()
+    active_favorite_aids = []
+    for inter in interactions:
+        if inter.article_id not in seen:
+            seen.add(inter.article_id)
+            if inter.interaction_type == "like":
+                active_favorite_aids.append(inter.article_id)
+                
     favorites = []
-    for l in likes:
-        if l.article_id not in seen:
-            seen.add(l.article_id)
-            p = db.query(Product).filter(Product.article_id == l.article_id).first()
-            if p:
-                favorites.append(ProductResponse.from_orm(p))
+    for aid in active_favorite_aids:
+        p = db.query(Product).filter(Product.article_id == aid, Product.is_active == True).first()
+        if p:
+            favorites.append(ProductResponse.from_orm(p).dict())
+            
+    cache.set_json(cache_key, favorites, ttl_seconds=60)
     return favorites
+
+@app.post("/users/{user_id}/favorites/{article_id}")
+def add_favorite(user_id: str, article_id: str, db: Session = Depends(get_db)):
+    """Explicitly save a product to user favorites."""
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        user = User(user_id=user_id)
+        db.add(user)
+        db.commit()
+    ensure_product_exists(db, article_id)
+    interaction = UserInteraction(
+        user_id=user_id,
+        article_id=article_id,
+        interaction_type="like",
+        context="wishlist_toggle"
+    )
+    db.add(interaction)
+    db.commit()
+    cache.delete(f"favs:user:{user_id}")
+    cache.delete(f"rec:user:{user_id}")
+    return {"status": "saved", "article_id": article_id}
+
+@app.delete("/users/{user_id}/favorites/{article_id}")
+def remove_favorite(user_id: str, article_id: str, db: Session = Depends(get_db)):
+    """Explicitly remove a product from user favorites."""
+    interaction = UserInteraction(
+        user_id=user_id,
+        article_id=article_id,
+        interaction_type="dismiss",
+        context="wishlist_toggle"
+    )
+    db.add(interaction)
+    db.commit()
+    cache.delete(f"favs:user:{user_id}")
+    cache.delete(f"rec:user:{user_id}")
+    return {"status": "removed", "article_id": article_id}
 
 @app.post("/outfits/save", status_code=status.HTTP_201_CREATED)
 def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):

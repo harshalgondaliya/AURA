@@ -5,6 +5,8 @@ import ProductCard from './ProductCard';
 
 export default function CatalogView({
   initialCategory = '',
+  initialGender = '',
+  onGenderChange,
   onSimilarClick,
   onOutfitClick,
   onLikeClick,
@@ -20,6 +22,9 @@ export default function CatalogView({
   const [color, setColor] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [gender, setGender] = useState(() => {
+    return initialGender || localStorage.getItem('aura_catalog_gender') || 'all';
+  });
 
   // Sync category if navigated from external section (e.g. homepage silhouette click)
   useEffect(() => {
@@ -28,6 +33,14 @@ export default function CatalogView({
       setPage(1);
     }
   }, [initialCategory]);
+
+  // Sync external gender prop if provided
+  useEffect(() => {
+    if (initialGender && initialGender !== gender) {
+      setGender(initialGender);
+      setPage(1);
+    }
+  }, [initialGender]);
 
   const categories = [
     { label: 'All Pieces', value: '' },
@@ -50,12 +63,12 @@ export default function CatalogView({
 
   useEffect(() => {
     loadCatalog();
-  }, [page, category, color, search]);
+  }, [page, category, color, search, gender]);
 
   const loadCatalog = async () => {
     setLoading(true);
     try {
-      const res = await fetchProducts(page, limit, category, color, search);
+      const res = await fetchProducts(page, limit, category, color, search, gender);
       setProducts(res.items || []);
       setTotalCount(res.total || 0);
     } catch (err) {
@@ -91,10 +104,10 @@ export default function CatalogView({
               <span className="w-1.5 h-1.5 rounded-full bg-aura-olive" />
               The Collection
             </div>
-            <h1 className="text-3xl sm:text-5xl font-serif font-light text-aura-espresso tracking-tight">
+            <h1 className="text-3xl sm:text-5xl font-serif font-normal text-aura-espresso tracking-tight">
               Curated Wardrobe Pieces
             </h1>
-            <p className="text-xs sm:text-sm text-aura-muted mt-1.5 font-light max-w-xl">
+            <p className="text-xs sm:text-sm text-aura-muted mt-1.5 font-normal max-w-xl">
               {totalCount.toLocaleString()} pieces carefully indexed for versatile styling, harmonious color pairing, and contemporary silhouettes.
             </p>
           </div>
@@ -119,6 +132,37 @@ export default function CatalogView({
               </button>
             )}
           </form>
+        </div>
+
+        {/* Department / Gender Scope Selector: Women | Men | All Pieces */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-b border-aura-espresso/6 pb-4">
+          <span className="text-[11px] font-mono uppercase tracking-widest text-aura-muted mr-2 flex items-center gap-1 font-medium">
+            Department:
+          </span>
+          {[
+            { label: 'All Pieces', value: 'all' },
+            { label: 'Women', value: 'women' },
+            { label: 'Men', value: 'men' },
+          ].map((g) => (
+            <button
+              key={g.value}
+              onClick={() => {
+                if (gender !== g.value) {
+                  setGender(g.value);
+                  setPage(1);
+                  localStorage.setItem('aura_catalog_gender', g.value);
+                  if (onGenderChange) onGenderChange(g.value);
+                }
+              }}
+              className={`px-4 py-1.5 rounded-full text-xs font-medium uppercase tracking-wider transition-all border ${
+                gender === g.value
+                  ? 'bg-aura-espresso text-aura-ivory border-aura-espresso shadow-xs'
+                  : 'bg-white text-aura-espresso/80 border-aura-espresso/15 hover:border-aura-espresso/40 hover:bg-aura-ivory'
+              }`}
+            >
+              {g.label}
+            </button>
+          ))}
         </div>
 
         {/* Category Slot Filter Pills */}

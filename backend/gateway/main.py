@@ -187,7 +187,7 @@ async def route_recommendations(rest_of_path: str, request: Request):
     return await forward_request(REC_SERVICE_URL, f"/recommendations/{rest_of_path}", request, breaker_rec)
 
 # --- Routing: User & Interaction Service ---
-@app.api_route("/api/users/{rest_of_path:path}", methods=["GET", "POST"])
+@app.api_route("/api/users/{rest_of_path:path}", methods=["GET", "POST", "DELETE", "PUT"])
 async def route_users(rest_of_path: str, request: Request):
     return await forward_request(USER_SERVICE_URL, f"/users/{rest_of_path}", request, breaker_user)
 

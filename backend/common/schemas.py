@@ -16,6 +16,7 @@ class ProductBase(BaseModel):
     standard_category: str
     colour_group_name: str
     perceived_colour_value_name: Optional[str] = None
+    gender: Optional[str] = "Unisex"
     detail_desc: Optional[str] = None
     price_cents: int = 2999
     image_path: Optional[str] = None
@@ -49,6 +50,7 @@ class OutfitSlotItem(BaseModel):
     prod_name: str
     product_type_name: str
     colour_group_name: str
+    gender: Optional[str] = "Unisex"
     image_path: Optional[str] = None
     compatibility_score: float = 1.0
 

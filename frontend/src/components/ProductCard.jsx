@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Sparkles, Layers, Heart } from 'lucide-react';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
 import { formatProductPrice } from '../utils/formatters';
+import { useWishlist } from '../context/WishlistContext';
 
 export default function ProductCard({
   product,
@@ -14,19 +15,26 @@ export default function ProductCard({
   similarityScore = null,
 }) {
   const [imageError, setImageError] = useState(false);
-  const [liked, setLiked] = useState(isLiked);
 
-  // Sync prop changes
-  React.useEffect(() => {
-    setLiked(isLiked);
-  }, [isLiked]);
+  // Consume centralized WishlistContext with safe fallback
+  let wishlistCtx = null;
+  try {
+    wishlistCtx = useWishlist();
+  } catch {
+    // Rendered outside provider (e.g. standalone test)
+  }
+
+  const liked = wishlistCtx
+    ? wishlistCtx.isWishlisted(product?.article_id)
+    : isLiked;
 
   const handleLike = (e) => {
     e.stopPropagation();
-    const nextLiked = !liked;
-    setLiked(nextLiked);
+    if (wishlistCtx) {
+      wishlistCtx.toggleWishlist(product);
+    }
     if (onLikeClick) {
-      onLikeClick(product, nextLiked);
+      onLikeClick(product, !liked);
     }
   };
 
@@ -102,7 +110,7 @@ export default function ProductCard({
       <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
         <div onClick={handleCardClick} className="cursor-pointer space-y-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-aura-olive truncate">
+            <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-aura-olive font-medium truncate">
               {product.product_type_name || 'Apparel'}
             </span>
             <span className="text-xs font-serif font-bold text-aura-espresso">

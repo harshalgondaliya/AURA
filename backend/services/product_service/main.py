@@ -49,15 +49,28 @@ def get_products(
     limit: int = Query(default=20, ge=1, le=100),
     category: Optional[str] = None,
     color: Optional[str] = None,
+    gender: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    cache_key = f"products:p{page}:l{limit}:c{category}:col{color}:s{search}"
+    cache_key = f"products:p{page}:l{limit}:c{category}:col{color}:g{gender}:s{search}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
 
     query = db.query(Product).filter(Product.is_active == True)
+    
+    # Scope filtering by catalog gender
+    if gender:
+        g_lower = gender.lower().strip()
+        if g_lower == "men":
+            query = query.filter(Product.gender.in_(["Men", "Unisex"]))
+        elif g_lower == "women":
+            query = query.filter(Product.gender.in_(["Women", "Unisex"]))
+        elif g_lower == "kids":
+            query = query.filter(Product.gender == "Kids")
+        elif g_lower == "unisex":
+            query = query.filter(Product.gender == "Unisex")
     
     if category:
         query = query.filter(Product.standard_category == category)
@@ -99,13 +112,30 @@ def get_product_detail(article_id: str, db: Session = Depends(get_db)):
     return resp
 
 @app.get("/categories")
-def get_categories(db: Session = Depends(get_db)):
-    cached = cache.get_json("categories:all")
+def get_categories(
+    gender: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    cache_key = f"categories:g{gender}"
+    cached = cache.get_json(cache_key)
     if cached:
         return cached
         
     from sqlalchemy import func
-    results = db.query(Product.standard_category, func.count(Product.id)).group_by(Product.standard_category).all()
+    query = db.query(Product.standard_category, func.count(Product.id)).filter(Product.is_active == True)
+    if gender:
+        g_lower = gender.lower().strip()
+        if g_lower == "men":
+            query = query.filter(Product.gender.in_(["Men", "Unisex"]))
+        elif g_lower == "women":
+            query = query.filter(Product.gender.in_(["Women", "Unisex"]))
+        elif g_lower == "kids":
+            query = query.filter(Product.gender == "Kids")
+        elif g_lower == "unisex":
+            query = query.filter(Product.gender == "Unisex")
+
+    results = query.group_by(Product.standard_category).all()
     categories = [{"category": r[0], "count": r[1]} for r in results]
-    cache.set_json("categories:all", categories, ttl_seconds=3600)
+    cache.set_json(cache_key, categories, ttl_seconds=3600)
+    return categories
     return categories

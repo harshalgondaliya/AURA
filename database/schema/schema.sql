@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS products (
     department_name VARCHAR(64),
     index_name VARCHAR(64),
     section_name VARCHAR(64),
+    gender VARCHAR(32) DEFAULT 'Unisex',
     detail_desc TEXT,
     price_cents INTEGER DEFAULT 2999, -- integer representation of currency (e.g. $29.99 or Rs 2999)
     image_path VARCHAR(255),
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 CREATE INDEX IF NOT EXISTS idx_products_article_id ON products(article_id);
+CREATE INDEX IF NOT EXISTS idx_products_gender ON products(gender);
 CREATE INDEX IF NOT EXISTS idx_products_standard_category ON products(standard_category);
 CREATE INDEX IF NOT EXISTS idx_products_colour ON products(colour_group_name);
 CREATE INDEX IF NOT EXISTS idx_products_active_has_image ON products(is_active, has_image);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Heart, User, Menu, X, ArrowRight, Layers, Sparkles } from 'lucide-react';
 import AuraLogo from './AuraLogo';
+import { useWishlist } from '../context/WishlistContext';
 
 export default function Navbar({
   activeTab,
@@ -12,6 +13,14 @@ export default function Navbar({
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+
+  let wishlistCtx = null;
+  try {
+    wishlistCtx = useWishlist();
+  } catch {
+    // Rendered outside provider
+  }
+  const effectiveWishlistCount = wishlistCtx ? wishlistCtx.wishlistCount : wishlistCount;
 
   const navItems = [
     { id: 'discover', label: 'Discover' },
@@ -95,10 +104,10 @@ export default function Navbar({
               }`}
               title="View Wishlist"
             >
-              <Heart className={`w-4 h-4 stroke-[1.5] ${wishlistCount > 0 ? 'fill-aura-espresso/15 text-aura-espresso' : ''}`} />
-              {wishlistCount > 0 && (
+              <Heart className={`w-4 h-4 stroke-[1.5] ${effectiveWishlistCount > 0 ? 'fill-aura-espresso/15 text-aura-espresso' : ''}`} />
+              {effectiveWishlistCount > 0 && (
                 <span className="absolute top-1 right-1 w-4 h-4 bg-aura-espresso text-aura-ivory text-[9px] font-bold rounded-full flex items-center justify-center animate-in zoom-in-75">
-                  {wishlistCount}
+                  {effectiveWishlistCount}
                 </span>
               )}
             </button>
@@ -213,9 +222,9 @@ export default function Navbar({
               className="text-left py-2 text-base font-serif tracking-wider text-aura-muted hover:text-aura-espresso flex items-center justify-between"
             >
               <span>Wishlist</span>
-              {wishlistCount > 0 && (
+              {effectiveWishlistCount > 0 && (
                 <span className="px-2 py-0.5 text-xs bg-aura-espresso text-aura-ivory rounded-full">
-                  {wishlistCount}
+                  {effectiveWishlistCount}
                 </span>
               )}
             </button>

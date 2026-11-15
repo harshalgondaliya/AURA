@@ -26,7 +26,8 @@ export default function SimilarView({
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchSimilarItems(product.article_id, 10, selectedMode, strictCat);
+      const genderScope = product?.gender || '';
+      const data = await fetchSimilarItems(product.article_id, 10, selectedMode, strictCat, genderScope);
       setSimilarItems(data);
     } catch (err) {
       console.error(err);
@@ -76,7 +77,7 @@ export default function SimilarView({
             <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-aura-olive">
               Selected Anchor Garment
             </p>
-            <h1 className="text-2xl sm:text-3xl font-serif text-aura-espresso font-light">
+            <h1 className="text-2xl sm:text-3xl font-serif text-aura-espresso font-normal">
               {product.prod_name}
             </h1>
             <p className="text-xs text-aura-muted mt-0.5">

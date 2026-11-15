@@ -21,13 +21,13 @@ export default function EditorialHero({ onExploreCollection, onCreateOutfit, onP
             </div>
 
             {/* Main Headline */}
-            <h1 className="text-4xl sm:text-6xl lg:text-7xl font-serif font-light text-aura-espresso tracking-tight leading-[1.08]">
+            <h1 className="text-4xl sm:text-6xl lg:text-7xl font-serif font-normal text-aura-espresso tracking-tight leading-[1.08]">
               Discover <br />
               <span className="italic font-normal text-aura-espresso/90">Your Style.</span>
             </h1>
 
             {/* Supporting Prose */}
-            <p className="text-base sm:text-lg text-aura-muted max-w-xl mx-auto lg:mx-0 font-light leading-relaxed">
+            <p className="text-base sm:text-lg text-aura-muted max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed">
               Find pieces you love. Create looks that feel like you. Seamless wardrobe curation powered by thoughtful garment intelligence.
             </p>
 
@@ -53,7 +53,7 @@ export default function EditorialHero({ onExploreCollection, onCreateOutfit, onP
             {/* Editorial Features Strip */}
             <div className="pt-8 grid grid-cols-3 gap-4 border-t border-aura-espresso/10 max-w-md mx-auto lg:mx-0 text-left">
               <div>
-                <p className="text-lg sm:text-xl font-serif font-semibold text-aura-espresso">5,000+</p>
+                <p className="text-lg sm:text-xl font-serif font-semibold text-aura-espresso">6,500+</p>
                 <p className="text-[10px] uppercase font-mono tracking-wider text-aura-muted mt-0.5">Curated Pieces</p>
               </div>
               <div>

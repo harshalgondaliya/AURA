@@ -11,10 +11,10 @@ export default {
           ivory: '#F8F6F1',       // Primary Page Background
           cream: '#EFECE4',       // Secondary Surface / Light Panels
           espresso: '#28231F',    // Primary Text / Deep Surfaces / Solid Buttons
-          olive: '#777B61',       // Sophisticated Subtle Accent
+          olive: '#555941',       // Sophisticated WCAG AA Accent (6.72:1 contrast)
           taupe: '#B9AE9E',       // Secondary Accents / Borders
           champagne: '#D8C9B2',   // Luxury Highlights / Warm Badges
-          muted: '#817B72',       // Subtitles / Secondary Prose
+          muted: '#57524A',       // WCAG AA Compliant Subtitles / Prose (7.17:1 contrast)
           white: '#FFFFFF',       // Card Backgrounds
           dark: '#1C1917',        // Deepest Rich Charcoal
         }
