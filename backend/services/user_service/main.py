@@ -201,20 +201,28 @@ def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):
 
     # Consolidate items ensuring anchor is always the primary garment
     all_items_to_save = []
+    used_slots = set()
     if req.anchor_article_id not in req.item_article_ids:
         anchor_sz = None
         if req.selected_sizes:
             anchor_sz = req.selected_sizes.get(req.anchor_article_id) or req.selected_sizes.get("anchor")
         all_items_to_save.append((req.anchor_article_id, "anchor", anchor_sz))
+        used_slots.add("anchor")
 
     for idx, aid in enumerate(req.item_article_ids):
         p_obj = db.query(Product).filter(Product.article_id == aid).first()
-        slot_name = p_obj.standard_category if (p_obj and p_obj.standard_category) else f"slot_{idx+1}"
+        base_slot = p_obj.standard_category if (p_obj and p_obj.standard_category) else f"slot_{idx+1}"
+        slot_name = base_slot
+        if slot_name in used_slots:
+            slot_name = f"{base_slot}_{idx+1}"
+        used_slots.add(slot_name)
+
         chosen_sz = None
         if req.selected_sizes:
             chosen_sz = (
                 req.selected_sizes.get(aid)
                 or req.selected_sizes.get(slot_name)
+                or req.selected_sizes.get(base_slot)
                 or req.selected_sizes.get(f"slot_{idx}")
                 or req.selected_sizes.get(f"slot_{idx+1}")
             )

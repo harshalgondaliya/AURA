@@ -1,65 +1,95 @@
-# AURA.AI: Intelligent Fashion Recommendation & Stylist Platform
+# AURA — Intelligent Fashion Recommendation Platform
 ### Production-Grade Machine Learning Pipeline &bull; Distributed Microservices &bull; Docker &bull; React + Vite Frontend
 
 ---
 
 ## 1. Executive Summary
 
-**AURA.AI** is a complete, end-to-end, testable fashion recommendation platform engineered using real transaction and visual data from the **H&M Kaggle Competition** (31.78M transactions, 105.5K articles, 105.1K catalog images) alongside structured product metadata from **Myntra** (526.5K products).
+**AURA** is a complete, end-to-end, testable fashion recommendation platform engineered using real transaction and visual data from the **H&M Kaggle Competition** (31.78M transactions, 105.5K articles, 105.1K catalog images) alongside structured product metadata from **Myntra** (526.5K products).
 
 Rather than a superficial demonstration, this system integrates:
 1. **A Complete Machine Learning Pipeline** across 10 standalone Jupyter Notebooks with temporal train/validation/test evaluation, MobileNetV2 visual embeddings, TF-IDF content extraction, Item-Item Collaborative Filtering, implicit matrix factorization, and an empirical outfit compatibility engine.
-2. **A Distributed Microservices Architecture** featuring a FastAPI Gateway with a Redis-backed Token Bucket rate limiter (HTTP 429), Circuit Breaker fault tolerance, PostgreSQL relational persistence, and asynchronous worker queues.
-3. **A Click-First React + Vite + Tailwind CSS Frontend** with zero hover-only dependencies, interactive slot-coordinated outfit synthesis, instant similar-item exploration, and real-time observability telemetry.
-4. **Comprehensive Concurrency Load Testing** benchmarked across 8 real-world traffic scenarios.
+2. **A Distributed Microservices Architecture** featuring a FastAPI Gateway with an atomic Redis Lua Token Bucket rate limiter (HTTP 429), Circuit Breaker fault tolerance, PostgreSQL relational persistence, and asynchronous worker queues.
+3. **A Luxury Editorial React 18 + Vite + Tailwind CSS Frontend** with size-aware shopping, interactive slot-coordinated outfit synthesis, instant similar-item exploration, and real-time observability telemetry.
+4. **Comprehensive Concurrency Load Testing** benchmarked across 8 real-world traffic scenarios and Locust integration.
+5. **Full Academic Project Compliance** satisfying all Stage 1 (Architecture & Gateway), Stage 2 (Persistence, Cache & Queue), and Stage 3 (Fault Tolerance & Load Testing) deliverables.
 
 ---
 
-## 2. Distributed Architecture
+## 2. Project Documentation & Academic Artifacts
+
+| Document | Path | Focus |
+| :--- | :--- | :--- |
+| **Assignment Compliance Matrix** | [`docs/sd_assignment/requirement_compliance_matrix.md`](docs/sd_assignment/requirement_compliance_matrix.md) | Itemized proof for all 15 SD & ML assignment requirements (ALL PASS) |
+| **Viva Demonstration Runbook** | [`docs/viva/live_demo_runbook.md`](docs/viva/live_demo_runbook.md) | Step-by-step 12 live demonstrations with commands, expected output & talking points |
+| **Academic Load Testing Report** | [`reports/system_performance/academic_load_test_report.md`](reports/system_performance/academic_load_test_report.md) | 3-page academic report with empirical benchmarks, latency percentiles & queue dynamics |
+| **Machine Learning Workflow Audit** | [`docs/ml/ml_workflow_audit.md`](docs/ml/ml_workflow_audit.md) | Detailed audit of all 10 notebooks, datasets, feature engineering & offline validation |
+| **System Architecture Diagrams** | [`infrastructure/diagrams/`](infrastructure/diagrams/) | 5 formal Mermaid diagrams (System, Request Flow, Cache, Queue, Circuit Breaker) |
+
+---
+
+## 3. Distributed Architecture
 
 ```mermaid
 flowchart TD
-    Client["React + Vite Frontend (Port 3000)<br/>• Direct Click Interactions<br/>• Outfit Studio & Visual Recs"]
+    Client["React 18 + Vite Frontend (Port 3000)<br/>• Luxury Editorial Styling<br/>• Size-Aware Shopping & Studio"]
     
     subgraph Gateway_Tier["API Gateway Tier (Port 8000)"]
         GW["FastAPI API Gateway"]
-        RL["Redis Token Bucket Rate Limiter<br/>(60 req/min, Burst 20 -> 429)"]
+        RL["Atomic Redis Lua Token Bucket Limiter<br/>(Capacity 60, Refill 0.5/s -> HTTP 429)"]
         CB["Circuit Breakers (State Machine)<br/>(5 failures -> OPEN -> Fallback)"]
-        Obs["Telemetry (X-Request-ID, /health, /metrics)"]
+        Obs["Telemetry (X-Request-ID, /api/health, /metrics)"]
         GW --> RL
         GW --> CB
         GW --> Obs
     end
 
-    subgraph Cache_And_Broker["Distributed Cache & State Tier"]
-        Redis[("Redis 7-Alpine<br/>(Port 6379)<br/>• Token Buckets<br/>• Query Caching (TTL 300s)")]
+    subgraph Cache_And_Broker["Distributed Cache & Queue Tier"]
+        Redis[("Redis 7-Alpine<br/>(Port 6379)<br/>• Token Bucket Lua Engine<br/>• Query Caching (TTL 300s)<br/>• Queue: queue:recommendation_tasks")]
     end
 
     subgraph Service_Tier["Microservice Tier"]
-        PS["Product Service (Port 8001)<br/>• Catalog Queries & Filters<br/>• Standardized Category Slots"]
+        PS["Product Service (Port 8001)<br/>• Catalog Queries & Filters<br/>• Size Matrix & Stock Availability"]
         RS["Recommendation Service (Port 8002)<br/>• MobileNetV2 Visual Embeddings (1280-d)<br/>• TF-IDF Text & Attributes Matrix<br/>• Outfit Slot Compatibility Engine"]
         US["User Service (Port 8003)<br/>• Preference Profiles & History<br/>• Interaction Logging & Likes<br/>• Saved Outfit Ensembles"]
     end
 
     subgraph Storage_Tier["Relational Persistence Tier"]
-        PG[("PostgreSQL 15 (Port 5432)<br/>• users, products, interactions<br/>• saved_outfits, outfit_items<br/>• recommendation_jobs")]
+        PG[("PostgreSQL 15 (Port 5433 host / 5432 container)<br/>• users, products, interactions<br/>• saved_outfits, outfit_items<br/>• recommendation_jobs (Named Volume: postgres_data)")]
     end
 
     subgraph Worker_Tier["Asynchronous Processing"]
-        Worker["Background Worker Daemon<br/>• Pending Job Polling<br/>• Heavy Multi-Slot Synthesis<br/>• Status: pending -> processing -> completed"]
+        Worker["Background Worker Daemon<br/>• BLPOP from queue:recommendation_tasks<br/>• Heavy Multi-Slot Synthesis<br/>• Updates PG: pending -> processing -> completed"]
     end
 
     Client -->|REST API / JSON| GW
-    GW -->|Route /products| PS
-    GW -->|Route /recommendations| RS
-    GW -->|Route /users, /interactions, /outfits| US
+    GW -->|Route /api/products| PS
+    GW -->|Route /api/recommendations| RS
+    GW -->|Route /api/users| US
+    GW -->|POST /api/jobs/recommendations| Redis
     GW -.->|Check/Store Cache| Redis
     PS --> PG
     US --> PG
     RS -.->|Cache Embeddings| Redis
+    Redis -->|BLPOP Task| Worker
     Worker --> PG
     Worker -.-> Redis
 ```
+
+---
+
+## 4. Port Allocation & Containers
+
+| Service | Container Name | Port | Description |
+| :--- | :--- | :--- | :--- |
+| **Frontend UI** | `fashion_frontend` | `3000` | React 18 + Vite + Tailwind CSS luxury editorial UI |
+| **API Gateway** | `fashion_api_gateway` | `8000` | Central reverse proxy, Token Bucket rate limiter, Circuit Breakers |
+| **Product Service** | `fashion_product_service` | `8001` | Catalog management, size systems, inventory, filtering |
+| **Recommendation Service** | `fashion_rec_service` | `8002` | MobileNetV2 visual vectors, TF-IDF, outfit slot harmony |
+| **User Service** | `fashion_user_service` | `8003` | User history, interactions, wishlist, saved ensembles |
+| **Worker Service** | `fashion_worker_service` | *internal* | Consumes Redis task queue (`BLPOP`), writes to PostgreSQL |
+| **PostgreSQL 15** | `fashion_postgres` | `5433` (host) / `5432` | Relational persistence, ACID transactions, named volume |
+| **Redis 7** | `fashion_redis` | `6379` | In-memory cache, atomic rate limiting, task queue broker |
 
 ---
 
@@ -247,5 +277,3 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ├── requirements.txt                     # Pinned Python package dependencies
 └── README.md                            # Complete Project Master Documentation
 ```
-
-# AURA

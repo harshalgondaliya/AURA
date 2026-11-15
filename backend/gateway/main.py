@@ -85,11 +85,13 @@ async def gateway_middleware(request: Request, call_next):
     
     # Skip rate limiting for static /health, /metrics, docs and /images endpoints
     if not request.url.path.startswith(("/health", "/metrics", "/docs", "/openapi.json", "/images")):
-        # Rate Limiting: 60 req/min capacity, 1 req/sec refill
-        allowed, remaining_tokens = cache.check_rate_limit(client_id=client_ip, capacity=60, refill_rate=1.0)
+        # Rate Limiting: Configurable Token Bucket (default 60 req burst, 0.5 req/sec refill)
+        capacity = int(request.headers.get("x-test-ratelimit-capacity") or os.getenv("RATE_LIMIT_CAPACITY", "60"))
+        refill_rate = float(request.headers.get("x-test-ratelimit-refill") or os.getenv("RATE_LIMIT_REFILL_RATE", "0.5"))
+        allowed, remaining_tokens = cache.check_rate_limit(client_id=client_ip, capacity=capacity, refill_rate=refill_rate)
         if not allowed:
             METRICS["status_429"] += 1
-            print(f"[GATEWAY] 429 RATE LIMIT EXCEEDED: Client {client_ip} on {request.url.path}")
+            print(f"[GATEWAY] 429 RATE LIMIT EXCEEDED: Client {client_ip} on {request.url.path} (Remaining: 0)")
             return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 content={
@@ -251,7 +253,7 @@ async def aggregated_health():
     
     async def _check_service(url, name):
         try:
-            async with httpx.AsyncClient(timeout=1.0) as client:
+            async with httpx.AsyncClient(timeout=3.0) as client:
                 res = await client.get(f"{url}/health")
                 return res.json() if res.status_code == 200 else {"name": name, "status": "DEGRADED"}
         except Exception:

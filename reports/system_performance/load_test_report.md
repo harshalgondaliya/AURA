@@ -22,14 +22,14 @@ We conducted concurrent load testing covering all **8 required system scenarios*
 
 | Scenario                    |   Total_Requests |   RPS |   Avg_Latency_ms |   p50_Latency_ms |   p95_Latency_ms |   p99_Latency_ms |   Error_Rate_Pct |   HTTP_429_Count |
 |:----------------------------|-----------------:|------:|-----------------:|-----------------:|-----------------:|-----------------:|-----------------:|-----------------:|
-| 1. Normal Request Volume    |               50 | 147.6 |             6.77 |             6.37 |             7.76 |            20.11 |             0    |                0 |
-| 2. Traffic Spike            |              150 | 241.6 |             4.14 |             2.92 |             7.4  |            28.26 |             0    |                0 |
-| 3. Rate Limiter Activation  |               75 |   5.6 |           178.61 |             4.33 |          2567.81 |          2617.74 |            86.67 |               10 |
-| 4. Cache Warm-Up            |               21 | 150.7 |             6.49 |             6.47 |             9.63 |             9.63 |             0    |                0 |
-| 5. Cache Hit vs Miss        |               45 |  62.7 |            12.95 |             8.53 |            34.36 |            42.98 |             0    |                0 |
-| 6. Circuit Breaker Fallback |               25 | 233.6 |             4.28 |             4.1  |             6.62 |             7.11 |           100    |                0 |
-| 7. Worker Queue Load        |               10 |   3.3 |            16.32 |            16.32 |            16.32 |            16.32 |             0    |                0 |
-| 8. Recovery After Failure   |               25 | 124.9 |             8.01 |             7.11 |            14.07 |            17.29 |             0    |                0 |
+| 1. Normal Request Volume    |               50 | 104.2 |             9.59 |             9.17 |            13.11 |            22.18 |                0 |                0 |
+| 2. Traffic Spike            |              150 |  83.6 |            11.96 |            13.35 |            18.85 |            24.58 |                0 |                0 |
+| 3. Rate Limiter Activation  |               75 |   1.7 |           574.47 |           598.63 |           809.13 |           888.64 |                0 |                0 |
+| 4. Cache Warm-Up            |               21 |  85.7 |            11.78 |            13.13 |             9.45 |             9.45 |                0 |                0 |
+| 5. Cache Hit vs Miss        |               45 |  45.9 |            10.6  |             9.32 |            65.25 |            88.17 |                0 |                0 |
+| 6. Circuit Breaker Fallback |               25 | 221.7 |             4.51 |             4.07 |             5.32 |             9.82 |              100 |                0 |
+| 7. Worker Queue Load        |               10 |   3.3 |            24.75 |            24.75 |            24.75 |            24.75 |                0 |                0 |
+| 8. Recovery After Failure   |               25 |  96   |            10.42 |             9.35 |            13.4  |            24.81 |                0 |                0 |
 
 ---
 

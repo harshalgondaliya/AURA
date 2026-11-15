@@ -82,7 +82,7 @@ def process_heavy_recommendation_task(job_id: str, user_id: str, payload: dict):
         db.close()
 
 def submit_async_recommendation_job(user_id: str, job_type: str, payload: dict) -> str:
-    """Creates a job record in DB, pushes to async background thread/queue, returns job_id."""
+    """Creates a job record in DB, pushes to Redis task queue, and returns job_id."""
     job_uuid = f"job_{uuid.uuid4().hex[:12]}"
     db = SessionLocal()
     
@@ -97,7 +97,16 @@ def submit_async_recommendation_job(user_id: str, job_type: str, payload: dict) 
     db.commit()
     db.close()
     
-    # Launch async background thread (or Celery task in Docker)
+    # 1. Push to Distributed Redis Task Queue
+    task_data = {
+        "job_id": job_uuid,
+        "user_id": user_id,
+        "payload": payload
+    }
+    pushed = cache.push_queue("queue:recommendation_tasks", task_data)
+    print(f"[GATEWAY TASK] Enqueued job {job_uuid} into Redis queue: {pushed}")
+
+    # 2. In standalone/local mode without separate daemon container, launch daemon thread
     worker_thread = threading.Thread(
         target=process_heavy_recommendation_task,
         args=(job_uuid, user_id, payload),
