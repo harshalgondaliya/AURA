@@ -20,8 +20,8 @@ export default {
         }
       },
       fontFamily: {
-        serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
-        sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+        serif: ['"Times New Roman"', 'Times', 'serif'],
+        sans: ['Calibri', 'Carlito', 'Arial', 'sans-serif'],
       },
       letterSpacing: {
         'editorial': '0.22em',

@@ -181,16 +181,20 @@ def get_similar_items(
     size: Optional[str] = Query(default=None)
 ):
     """Feature A: Recommend Similar Clothing Items with slot, gender and size integrity."""
-    cache_key = f"rec:similar:{article_id}:k{top_k}:m{mode}:fc{filter_category}:g{gender}:sz{size}"
+    anchor_meta = article_meta[article_id]
+    anchor_cat = anchor_meta.get("standard_category")
+
+    # Determine effective gender: explicit query param > anchor item's gender
+    effective_gender = gender
+    if not effective_gender or str(effective_gender).lower().strip() == "all":
+        anchor_norm_g = anchor_meta.get("normalized_gender")
+        if anchor_norm_g in ("Men", "Women"):
+            effective_gender = anchor_norm_g
+
+    cache_key = f"rec:similar:{article_id}:k{top_k}:m{mode}:fc{filter_category}:g{effective_gender}:sz{size}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
-
-    if article_id not in article_meta:
-        raise HTTPException(status_code=404, detail=f"Article '{article_id}' not found.")
-
-    anchor_meta = article_meta[article_id]
-    anchor_cat = anchor_meta.get("standard_category")
 
     scores = np.zeros(len(df_articles), dtype=np.float32)
 
@@ -221,15 +225,15 @@ def get_similar_items(
         cat_mask = (df_articles["standard_category"] == anchor_cat).values
         scores = np.where(cat_mask, scores, scores - 10.0)
 
-    # 4. Gender scope filtering
-    if gender:
-        g_lower = gender.lower().strip()
+    # 4. Strict gender scope filtering (prevents cross-gender contamination)
+    if effective_gender:
+        g_lower = str(effective_gender).lower().strip()
         if g_lower == "men":
             gender_mask = df_articles["normalized_gender"].isin(["Men", "Unisex"]).values
-            scores = np.where(gender_mask, scores, scores - 15.0)
+            scores = np.where(gender_mask, scores, scores - 100.0)
         elif g_lower == "women":
             gender_mask = df_articles["normalized_gender"].isin(["Women", "Unisex"]).values
-            scores = np.where(gender_mask, scores, scores - 15.0)
+            scores = np.where(gender_mask, scores, scores - 100.0)
 
     # 5. Size eligibility constraint
     if size:
@@ -278,14 +282,24 @@ def get_outfit_recommendations(
     if cached:
         return cached
 
-    # Structural slot constraints (Section 6: Configurable composition)
+    # Structural slot constraints (Category-Aware Outfit Templates)
     if anchor_slot == "upper_body":
+        # Template A: Upper Body Anchor -> Lower Body + Footwear + Accessory
         needed_slots = ["lower_body", "shoes", "accessories"]
     elif anchor_slot == "lower_body":
+        # Template B: Lower Body Anchor -> Upper Body + Footwear + Accessory
         needed_slots = ["upper_body", "shoes", "accessories"]
     elif anchor_slot == "full_body":
-        needed_slots = ["shoes", "accessories"]
+        # Template C: Full Body Anchor -> Footwear + Primary Accessory + Secondary Accessory
+        needed_slots = ["shoes", "accessories", "accessories_2"]
+    elif anchor_slot == "shoes":
+        # Template D: Footwear Anchor -> Upper Body + Lower Body + Accessory (NEVER picks duplicate shoes!)
+        needed_slots = ["upper_body", "lower_body", "accessories"]
+    elif anchor_slot == "accessories":
+        # Template E: Accessory Anchor -> Upper Body + Lower Body + Footwear
+        needed_slots = ["upper_body", "lower_body", "shoes"]
     else:
+        # Fallback Template
         needed_slots = ["upper_body", "lower_body", "shoes"]
 
     outfit_slots = {}
@@ -293,20 +307,28 @@ def get_outfit_recommendations(
     total_harmony = 0.0
 
     for slot_idx, slot in enumerate(needed_slots):
+        target_slot_cat = "accessories" if slot == "accessories_2" else slot
         # 1. Retrieve gender-partitioned candidates for this slot
-        candidates = slot_candidates.get((slot, target_gender))
+        candidates = slot_candidates.get((target_slot_cat, target_gender))
         if not candidates:
-            candidates = slot_candidates.get((slot, "all"), popular_articles)
+            candidates = slot_candidates.get((target_slot_cat, "all"), popular_articles)
 
         # 2. Score candidates by color harmony with anchor & slot size constraints
         scored_candidates = []
-        pref_size = size_preferences.get(slot)
+        pref_size = size_preferences.get(slot) or size_preferences.get(target_slot_cat)
 
         for cid in candidates[:150]:
             if cid in chosen_aids_in_outfit or cid == anchor_id:
                 continue
             cmeta = article_meta.get(cid, {})
-            if cmeta.get("standard_category") != slot:
+            if cmeta.get("standard_category") != target_slot_cat:
+                continue
+
+            # Strict candidate gender verification
+            item_gender = cmeta.get("normalized_gender", "Unisex")
+            if target_gender == "Men" and item_gender not in ("Men", "Unisex"):
+                continue
+            if target_gender == "Women" and item_gender not in ("Women", "Unisex"):
                 continue
             
             base_score = color_harmony(anchor_color, cmeta.get("colour_group_name", "Black"))
@@ -338,7 +360,16 @@ def get_outfit_recommendations(
             pick_idx = (resynthesize_count * 3 + slot_idx * 5) % len(top_pool)
             pick_cid, _, final_score = top_pool[pick_idx]
         else:
-            pick_cid = candidates[0]
+            pick_cid = None
+            for c in candidates:
+                if c not in chosen_aids_in_outfit and c != anchor_id:
+                    cm = article_meta.get(c, {})
+                    cg = cm.get("normalized_gender", "Unisex")
+                    if (target_gender == "Men" and cg in ("Men", "Unisex")) or (target_gender == "Women" and cg in ("Women", "Unisex")):
+                        pick_cid = c
+                        break
+            if not pick_cid:
+                pick_cid = candidates[0]
             final_score = 0.85
 
         chosen_aids_in_outfit.add(pick_cid)

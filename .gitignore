@@ -67,3 +67,4 @@ frontend/.vite/
 *.db
 postgres_data/
 redis_data/
+scratch/

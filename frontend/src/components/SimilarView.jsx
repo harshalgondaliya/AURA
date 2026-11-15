@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Sparkles, Filter, SlidersHorizontal, Loader2, Layers } from 'lucide-react';
 import { fetchSimilarItems } from '../services/api';
 import ProductCard from './ProductCard';
+import ProductGenderLabel from './ProductGenderLabel';
 
 export default function SimilarView({
   product,
@@ -75,9 +76,12 @@ export default function SimilarView({
             />
           </div>
           <div>
-            <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-aura-olive">
-              Selected Anchor Garment
-            </p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-[10px] font-mono uppercase tracking-[0.22em] text-aura-olive">
+                Selected Anchor Garment
+              </p>
+              <ProductGenderLabel product={product} />
+            </div>
             <h1 className="text-2xl sm:text-3xl font-serif text-aura-espresso font-normal">
               {product.prod_name}
             </h1>

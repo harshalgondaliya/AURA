@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Layers, Calendar, ArrowRight, Loader2, Sparkles, Trash2 } from 'lucide-react';
 import { fetchSavedOutfits } from '../services/api';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
+import ProductGenderLabel from './ProductGenderLabel';
 import { formatProductPrice } from '../utils/formatters';
 
 export default function SavedOutfitsView({
@@ -135,10 +136,13 @@ export default function SavedOutfitsView({
                       <p className="text-[11px] font-serif font-semibold text-aura-espresso line-clamp-1">
                         {it.prod_name}
                       </p>
-                      <div className="flex items-center justify-between gap-1">
-                        <p className="text-[9px] font-mono uppercase tracking-wider text-aura-muted truncate">
-                          {it.product_type_name || 'Piece'}
-                        </p>
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <div className="flex items-center gap-1 min-w-0">
+                          <p className="text-[9px] font-mono uppercase tracking-wider text-aura-muted truncate">
+                            {it.product_type_name || 'Piece'}
+                          </p>
+                          <ProductGenderLabel product={it} size="xs" />
+                        </div>
                         <span className="text-[10px] font-serif font-bold text-aura-espresso shrink-0">
                           {formatProductPrice(it)}
                         </span>

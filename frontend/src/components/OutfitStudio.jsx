@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { fetchOutfitRecommendations, saveOutfit, recordInteraction } from '../services/api';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
+import ProductGenderLabel from './ProductGenderLabel';
 import { formatProductPrice } from '../utils/formatters';
 import { useWishlist } from '../context/WishlistContext';
 
@@ -420,9 +421,12 @@ export default function OutfitStudio({
 
             <div className="absolute bottom-3 left-3 right-3 p-3.5 bg-white/95 backdrop-blur-md rounded-xl text-aura-espresso border border-aura-espresso/10">
               <div className="flex items-center justify-between">
-                <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-aura-olive font-medium">
-                  {anchor.standard_category ? anchor.standard_category.replace('_', ' ') : 'Piece'}
-                </p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-aura-olive font-medium">
+                    {anchor.standard_category ? anchor.standard_category.replace('_', ' ') : 'Piece'}
+                  </p>
+                  <ProductGenderLabel product={anchor} />
+                </div>
                 <span className="text-xs font-serif font-bold text-aura-espresso">
                   {formatProductPrice(anchor)}
                 </span>
@@ -504,11 +508,14 @@ export default function OutfitStudio({
                   >
                     <div className="space-y-3">
                       {/* Slot Header */}
-                      <div className="flex items-center justify-between">
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-[0.2em] bg-aura-cream text-aura-espresso font-medium">
-                          {slotKey.replace('_', ' ')}
-                        </span>
-                        <span className="text-[11px] font-mono text-aura-olive font-semibold">
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-[0.2em] bg-aura-cream text-aura-espresso font-medium truncate">
+                            {slotKey === 'accessories_2' ? 'Accent Accessory' : slotKey.replace('_', ' ')}
+                          </span>
+                          <ProductGenderLabel product={item} />
+                        </div>
+                        <span className="text-[11px] font-mono text-aura-olive font-semibold shrink-0">
                           {Math.round(item.compatibility_score * 100)}% match
                         </span>
                       </div>

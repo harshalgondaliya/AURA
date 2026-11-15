@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Compass, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import HomepageView from './components/HomepageView';
@@ -12,15 +13,99 @@ import SavedOutfitsView from './components/SavedOutfitsView';
 import SystemArchitectureView from './components/SystemArchitectureView';
 import NotificationToast from './components/NotificationToast';
 import { WishlistProvider, useWishlist } from './context/WishlistContext';
-import { recordInteraction } from './services/api';
+import { recordInteraction, fetchProductById } from './services/api';
+
+/**
+ * Clean URL Router Helper
+ * Maps browser location to views, extracts parameters, handles legacy redirects.
+ */
+function parseUrl(pathname = window.location.pathname, search = window.location.search) {
+  const cleanPath = pathname.replace(/\/+$/, '') || '/';
+  const params = new URLSearchParams(search);
+
+  // 1. Legacy Query Redirects: ?tab=... or ?view=...
+  const legacyTab = params.get('tab') || params.get('view');
+  if (legacyTab) {
+    const qProduct = params.get('product') || params.get('item');
+    if (legacyTab === 'discover') return { tab: 'discover', redirect: '/' };
+    if (legacyTab === 'shop') {
+      const rest = new URLSearchParams();
+      if (params.get('gender')) rest.set('gender', params.get('gender'));
+      if (params.get('category')) rest.set('category', params.get('category'));
+      const q = rest.toString();
+      return {
+        tab: 'shop',
+        redirect: q ? `/shop?${q}` : '/shop',
+        gender: params.get('gender') || undefined,
+        category: params.get('category') || undefined,
+      };
+    }
+    if (legacyTab === 'outfits') {
+      const q = qProduct ? `?anchor=${qProduct}` : '';
+      return { tab: 'outfits', anchorId: qProduct, redirect: `/outfits${q}` };
+    }
+    if (legacyTab === 'for_you' || legacyTab === 'for-you') return { tab: 'for_you', redirect: '/for-you' };
+    if (legacyTab === 'wishlist') return { tab: 'wishlist', redirect: '/wishlist' };
+    if (legacyTab === 'saved_outfits' || legacyTab === 'saved-outfits') return { tab: 'saved_outfits', redirect: '/saved-outfits' };
+    if (legacyTab === 'architecture') return { tab: 'architecture', redirect: '/architecture' };
+    if (legacyTab === 'product' && qProduct) return { tab: 'product', productId: qProduct, redirect: `/product/${qProduct}` };
+    if (legacyTab === 'similar' && qProduct) return { tab: 'similar', productId: qProduct, redirect: `/similar/${qProduct}` };
+  }
+
+  // 2. Direct Clean Path Routes
+  if (cleanPath === '' || cleanPath === '/') {
+    return { tab: 'discover' };
+  }
+  if (cleanPath === '/shop') {
+    return {
+      tab: 'shop',
+      gender: params.get('gender') || undefined,
+      category: params.get('category') || undefined,
+    };
+  }
+  if (cleanPath === '/outfits') {
+    return {
+      tab: 'outfits',
+      anchorId: params.get('anchor') || undefined,
+    };
+  }
+  if (cleanPath === '/for-you' || cleanPath === '/for_you') {
+    return { tab: 'for_you' };
+  }
+  if (cleanPath === '/wishlist') {
+    return { tab: 'wishlist' };
+  }
+  if (cleanPath === '/saved-outfits' || cleanPath === '/saved_outfits') {
+    return { tab: 'saved_outfits' };
+  }
+  if (cleanPath === '/architecture') {
+    return { tab: 'architecture' };
+  }
+
+  // /product/:productId
+  const prodMatch = cleanPath.match(/^\/product\/([^\/]+)$/);
+  if (prodMatch) {
+    return { tab: 'product', productId: decodeURIComponent(prodMatch[1]) };
+  }
+
+  // /similar/:productId
+  const simMatch = cleanPath.match(/^\/similar\/([^\/]+)$/);
+  if (simMatch) {
+    return { tab: 'similar', productId: decodeURIComponent(simMatch[1]) };
+  }
+
+  // Fallback 404 Route
+  return { tab: 'not_found', path: cleanPath };
+}
 
 function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
-  const [activeTab, setActiveTab] = useState('discover'); // 'discover', 'shop', 'outfits', 'for_you', 'wishlist', 'saved_outfits', 'product', 'similar', 'architecture'
+  const [activeTab, setActiveTab] = useState('discover');
   const [previousTab, setPreviousTab] = useState('discover');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [anchorProduct, setAnchorProduct] = useState(null);
   const [recentViewIds, setRecentViewIds] = useState([]);
+  const [productLoading, setProductLoading] = useState(false);
 
   // Persistent Gender Scope (defaults to 'all', can be 'women' or 'men')
   const [selectedGender, setSelectedGender] = useState(() => {
@@ -30,71 +115,179 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   // Centralized Wishlist Store Hook
   const { wishlistIds, isWishlisted, toggleWishlist, wishlistCount } = useWishlist();
 
-  // URL Query Sync on Mount
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tabParam = params.get('tab') || params.get('view');
-    const genderParam = params.get('gender');
-    const catParam = params.get('category');
-    if (tabParam && ['discover', 'shop', 'outfits', 'for_you', 'wishlist', 'saved_outfits', 'architecture'].includes(tabParam)) {
-      setActiveTab(tabParam);
+  // Async Product Loader for Direct Link / Refresh
+  const loadProduct = useCallback(async (id) => {
+    setProductLoading(true);
+    try {
+      const prod = await fetchProductById(id);
+      setSelectedProduct(prod);
+    } catch (err) {
+      console.error('Failed to load product by id:', err);
+      showToast(`Garment #${id} could not be loaded`, 'error');
+      setActiveTab('shop');
+      window.history.replaceState(null, '', '/shop');
+    } finally {
+      setProductLoading(false);
     }
-    if (genderParam && ['women', 'men', 'all'].includes(genderParam)) {
-      setSelectedGender(genderParam);
-    }
-    if (catParam) {
-      setSelectedCategory(catParam);
+  }, [showToast]);
+
+  const loadAnchor = useCallback(async (id) => {
+    try {
+      const prod = await fetchProductById(id);
+      setAnchorProduct(prod);
+    } catch (err) {
+      console.error('Failed to load anchor:', err);
     }
   }, []);
 
-  // Update Browser URL on State Changes
+  // Initial Route Sync on Mount
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (activeTab === 'discover') {
-      url.searchParams.delete('tab');
-      url.searchParams.delete('view');
-    } else {
-      url.searchParams.set('tab', activeTab);
+    const parsed = parseUrl();
+    if (parsed.redirect) {
+      window.history.replaceState(null, '', parsed.redirect);
     }
-    if (activeTab === 'shop') {
-      if (selectedGender && selectedGender !== 'all') {
-        url.searchParams.set('gender', selectedGender);
-      } else {
-        url.searchParams.delete('gender');
+    if (parsed.gender && ['women', 'men', 'all'].includes(parsed.gender)) {
+      setSelectedGender(parsed.gender);
+    }
+    if (parsed.category) {
+      setSelectedCategory(parsed.category);
+    }
+    if (parsed.anchorId) {
+      loadAnchor(parsed.anchorId);
+    }
+    if (parsed.productId) {
+      loadProduct(parsed.productId);
+    }
+    setActiveTab(parsed.tab);
+  }, [loadAnchor, loadProduct]);
+
+  // Browser Back / Forward Handling (window.onpopstate)
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseUrl();
+      if (parsed.redirect) {
+        window.history.replaceState(null, '', parsed.redirect);
       }
-      if (selectedCategory) {
-        url.searchParams.set('category', selectedCategory);
-      } else {
-        url.searchParams.delete('category');
+      if (parsed.gender && ['women', 'men', 'all'].includes(parsed.gender)) {
+        setSelectedGender(parsed.gender);
       }
-    } else {
-      url.searchParams.delete('gender');
-      url.searchParams.delete('category');
-    }
-    if (activeTab === 'product' && selectedProduct) {
-      url.searchParams.set('product', selectedProduct.article_id);
-    } else {
-      url.searchParams.delete('product');
-    }
-    window.history.replaceState({}, '', url.toString());
-  }, [activeTab, selectedGender, selectedCategory, selectedProduct]);
+      if (parsed.category) {
+        setSelectedCategory(parsed.category);
+      }
+      if (parsed.anchorId && (!anchorProduct || anchorProduct.article_id !== parsed.anchorId)) {
+        loadAnchor(parsed.anchorId);
+      }
+      if (parsed.productId && (!selectedProduct || selectedProduct.article_id !== parsed.productId)) {
+        loadProduct(parsed.productId);
+      }
+      setActiveTab(parsed.tab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [selectedProduct, anchorProduct, loadAnchor, loadProduct]);
 
   const handleGenderChange = (gender) => {
     setSelectedGender(gender);
     localStorage.setItem('aura_catalog_gender', gender);
+    if (activeTab === 'shop') {
+      const p = new URLSearchParams(window.location.search);
+      if (gender && gender !== 'all') p.set('gender', gender);
+      else p.delete('gender');
+      const q = p.toString();
+      window.history.replaceState(null, '', q ? `/shop?${q}` : '/shop');
+    }
   };
 
-  const navigateTo = (tab) => {
-    if (activeTab !== tab && activeTab !== 'product' && activeTab !== 'similar') {
+  const navigateTo = (tab, extra = {}) => {
+    let targetTab = tab;
+    let targetPath = '/';
+
+    if (tab === 'discover' || tab === '/') {
+      targetTab = 'discover';
+      targetPath = '/';
+    } else if (tab === 'shop' || tab === '/shop') {
+      targetTab = 'shop';
+      const p = new URLSearchParams();
+      const g = extra.gender !== undefined ? extra.gender : selectedGender;
+      const c = extra.category !== undefined ? extra.category : selectedCategory;
+      if (g && g !== 'all') p.set('gender', g);
+      if (c) p.set('category', c);
+      const q = p.toString();
+      targetPath = q ? `/shop?${q}` : '/shop';
+    } else if (tab === 'outfits' || tab === '/outfits') {
+      targetTab = 'outfits';
+      const anchor = extra.anchor || anchorProduct;
+      targetPath = anchor?.article_id ? `/outfits?anchor=${anchor.article_id}` : '/outfits';
+    } else if (tab === 'for_you' || tab === 'for-you' || tab === '/for-you') {
+      targetTab = 'for_you';
+      targetPath = '/for-you';
+    } else if (tab === 'wishlist' || tab === '/wishlist') {
+      targetTab = 'wishlist';
+      targetPath = '/wishlist';
+    } else if (tab === 'saved_outfits' || tab === 'saved-outfits' || tab === '/saved-outfits') {
+      targetTab = 'saved_outfits';
+      targetPath = '/saved-outfits';
+    } else if (tab === 'architecture' || tab === '/architecture') {
+      targetTab = 'architecture';
+      targetPath = '/architecture';
+    } else if (tab === 'product') {
+      targetTab = 'product';
+      const prod = extra.product || selectedProduct;
+      if (prod) {
+        setSelectedProduct(prod);
+        targetPath = `/product/${prod.article_id}`;
+      } else {
+        targetTab = 'shop';
+        targetPath = '/shop';
+      }
+    } else if (tab === 'similar') {
+      targetTab = 'similar';
+      const prod = extra.product || selectedProduct;
+      if (prod) {
+        setSelectedProduct(prod);
+        targetPath = `/similar/${prod.article_id}`;
+      } else {
+        targetTab = 'shop';
+        targetPath = '/shop';
+      }
+    } else if (typeof tab === 'string' && tab.startsWith('/product/')) {
+      targetTab = 'product';
+      targetPath = tab;
+      const pid = tab.replace('/product/', '');
+      if (!selectedProduct || selectedProduct.article_id !== pid) {
+        loadProduct(pid);
+      }
+    } else if (typeof tab === 'string' && tab.startsWith('/similar/')) {
+      targetTab = 'similar';
+      targetPath = tab;
+      const pid = tab.replace('/similar/', '');
+      if (!selectedProduct || selectedProduct.article_id !== pid) {
+        loadProduct(pid);
+      }
+    } else {
+      targetTab = 'not_found';
+      targetPath = tab;
+    }
+
+    if (activeTab !== targetTab && activeTab !== 'product' && activeTab !== 'similar') {
       setPreviousTab(activeTab);
     }
-    setActiveTab(tab);
+    window.history.pushState(null, '', targetPath);
+    setActiveTab(targetTab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSelectCategory = (slot) => {
     setSelectedCategory(slot);
-    navigateTo('shop');
+    const p = new URLSearchParams();
+    if (selectedGender && selectedGender !== 'all') p.set('gender', selectedGender);
+    if (slot) p.set('category', slot);
+    const q = p.toString();
+    const newPath = q ? `/shop?${q}` : '/shop';
+    window.history.pushState(null, '', newPath);
+    setActiveTab('shop');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Direct Product Card Selection -> Dedicated Full-Page Product Detail View
@@ -102,6 +295,7 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
     setSelectedProduct(product);
     setPreviousTab(activeTab === 'product' ? previousTab : activeTab);
     setActiveTab('product');
+    window.history.pushState(null, '', `/product/${product.article_id}`);
     recordInteraction(activeUser, product.article_id, 'view', { component: 'product_detail' });
     setRecentViewIds((prev) => [product.article_id, ...prev.filter((id) => id !== product.article_id)].slice(0, 10));
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -111,6 +305,7 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   const handleSimilarClick = (product) => {
     setSelectedProduct(product);
     setActiveTab('similar');
+    window.history.pushState(null, '', `/similar/${product.article_id}`);
     recordInteraction(activeUser, product.article_id, 'view', { action: 'open_similar' });
     setRecentViewIds((prev) => [product.article_id, ...prev.filter((id) => id !== product.article_id)].slice(0, 10));
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -120,6 +315,7 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   const handleOutfitClick = (product) => {
     setAnchorProduct(product);
     setActiveTab('outfits');
+    window.history.pushState(null, '', `/outfits?anchor=${product.article_id}`);
     recordInteraction(activeUser, product.article_id, 'view', { action: 'style_outfit' });
     setRecentViewIds((prev) => [product.article_id, ...prev.filter((id) => id !== product.article_id)].slice(0, 10));
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -175,27 +371,61 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
         )}
 
         {/* DEDICATED FULL-PAGE PRODUCT DETAIL */}
-        {activeTab === 'product' && selectedProduct && (
-          <ProductDetailView
-            product={selectedProduct}
-            onBack={() => navigateTo(previousTab || 'shop')}
-            onSimilarClick={handleSimilarClick}
-            onOutfitClick={handleOutfitClick}
-            onLikeClick={handleLikeClick}
-            isLiked={isWishlisted(selectedProduct.article_id)}
-          />
+        {activeTab === 'product' && (
+          productLoading ? (
+            <div className="py-24 text-center space-y-4">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto text-aura-olive" />
+              <p className="font-serif text-sm text-aura-espresso">Curating garment details...</p>
+            </div>
+          ) : selectedProduct ? (
+            <ProductDetailView
+              product={selectedProduct}
+              onBack={() => navigateTo(previousTab || 'shop')}
+              onSimilarClick={handleSimilarClick}
+              onOutfitClick={handleOutfitClick}
+              onLikeClick={handleLikeClick}
+              isLiked={isWishlisted(selectedProduct.article_id)}
+            />
+          ) : (
+            <div className="max-w-xl mx-auto px-4 py-24 text-center space-y-4">
+              <p className="font-serif text-lg text-aura-espresso">Garment Not Found</p>
+              <button
+                onClick={() => navigateTo('shop')}
+                className="px-6 py-2.5 bg-aura-espresso text-aura-ivory rounded-full text-xs uppercase tracking-widest font-medium"
+              >
+                Browse Collection
+              </button>
+            </div>
+          )
         )}
 
         {/* DEDICATED SIMILAR PIECES VIEW */}
-        {activeTab === 'similar' && selectedProduct && (
-          <SimilarView
-            product={selectedProduct}
-            onBack={() => navigateTo('product')}
-            onProductSelect={handleProductSelect}
-            onOutfitClick={handleOutfitClick}
-            onLikeClick={handleLikeClick}
-            wishlistIds={wishlistIds}
-          />
+        {activeTab === 'similar' && (
+          productLoading ? (
+            <div className="py-24 text-center space-y-4">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto text-aura-olive" />
+              <p className="font-serif text-sm text-aura-espresso">Finding similar silhouettes...</p>
+            </div>
+          ) : selectedProduct ? (
+            <SimilarView
+              product={selectedProduct}
+              onBack={() => navigateTo('product')}
+              onProductSelect={handleProductSelect}
+              onOutfitClick={handleOutfitClick}
+              onLikeClick={handleLikeClick}
+              wishlistIds={wishlistIds}
+            />
+          ) : (
+            <div className="max-w-xl mx-auto px-4 py-24 text-center space-y-4">
+              <p className="font-serif text-lg text-aura-espresso">Garment Not Found</p>
+              <button
+                onClick={() => navigateTo('shop')}
+                className="px-6 py-2.5 bg-aura-espresso text-aura-ivory rounded-full text-xs uppercase tracking-widest font-medium"
+              >
+                Browse Collection
+              </button>
+            </div>
+          )
         )}
 
         {/* OUTFIT STUDIO: Interactive Wardrobe Synthesizer with Look History */}
@@ -252,6 +482,36 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
           <SystemArchitectureView
             onBackToShopping={() => navigateTo('discover')}
           />
+        )}
+
+        {/* 404 NOT FOUND */}
+        {activeTab === 'not_found' && (
+          <div className="max-w-xl mx-auto px-4 py-28 text-center space-y-6 animate-in fade-in duration-300">
+            <div className="w-16 h-16 rounded-full bg-aura-cream mx-auto flex items-center justify-center">
+              <Compass className="w-8 h-8 text-aura-olive" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-aura-olive font-medium">404 Error</p>
+              <h1 className="text-3xl font-serif text-aura-espresso font-normal">Page Not Found</h1>
+              <p className="text-xs text-aura-muted max-w-sm mx-auto">
+                The requested fashion route could not be located in our editorial collection.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => navigateTo('discover')}
+                className="px-6 py-2.5 bg-aura-espresso text-aura-ivory rounded-full text-xs font-medium uppercase tracking-widest hover:bg-aura-dark transition-colors shadow-xs"
+              >
+                Return to Home
+              </button>
+              <button
+                onClick={() => navigateTo('shop')}
+                className="px-6 py-2.5 bg-aura-cream text-aura-espresso rounded-full text-xs font-medium uppercase tracking-widest hover:bg-aura-taupe/30 transition-colors"
+              >
+                Browse Collection
+              </button>
+            </div>
+          </div>
         )}
       </main>
 

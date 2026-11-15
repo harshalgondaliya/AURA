@@ -16,12 +16,14 @@
 @layer base {
   body {
     @apply antialiased bg-aura-ivory text-aura-espresso font-sans;
+    font-family: Calibri, Carlito, Arial, sans-serif;
     background-color: #F8F6F1;
     color: #28231F;
   }
 
   h1, h2, h3, .font-editorial {
     @apply font-serif;
+    font-family: "Times New Roman", Times, serif;
   }
 }
 

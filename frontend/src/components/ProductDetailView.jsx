@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Sparkles, Layers, Heart, Share2, Check, ShieldCheck, Tag, Ruler, X } from 'lucide-react';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
+import ProductGenderLabel from './ProductGenderLabel';
 import { formatProductPrice } from '../utils/formatters';
 import { getSizeSystemLabel, SIZE_CHARTS } from '../utils/sizeFormatters';
 import { useWishlist } from '../context/WishlistContext';
@@ -120,11 +121,12 @@ export default function ProductDetailView({
               />
             )}
 
-            {/* Subtle Category Slot Floating Badge */}
-            <div className="absolute top-4 left-4">
+            {/* Category & Gender Floating Badges */}
+            <div className="absolute top-4 left-4 flex items-center gap-2">
               <span className="px-3 py-1 rounded-full text-[10px] font-mono uppercase tracking-[0.22em] bg-white/90 backdrop-blur-md text-aura-espresso shadow-xs border border-aura-espresso/5">
                 {categoryLabel}
               </span>
+              <ProductGenderLabel product={product} />
             </div>
           </div>
         </div>
@@ -133,10 +135,12 @@ export default function ProductDetailView({
         <div className="lg:col-span-5 space-y-8">
           {/* Header & Title */}
           <div className="space-y-2 border-b border-aura-espresso/8 pb-6">
-            <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-aura-olive">
+            <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-aura-olive flex-wrap">
               <span>{product.product_type_name || 'Apparel'}</span>
               <span>&bull;</span>
               <span>{product.product_group_name || 'Garment'}</span>
+              <span>&bull;</span>
+              <ProductGenderLabel product={product} />
             </div>
 
             <h1 className="text-3xl sm:text-5xl font-serif font-normal text-aura-espresso tracking-tight leading-tight">

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, Layers, Heart } from 'lucide-react';
 import ProductImagePlaceholder from './ProductImagePlaceholder';
+import ProductGenderLabel from './ProductGenderLabel';
 import { formatProductPrice } from '../utils/formatters';
 import { getCardSizeDisplay } from '../utils/sizeFormatters';
 import { useWishlist } from '../context/WishlistContext';
@@ -76,11 +77,12 @@ export default function ProductCard({
           />
         )}
 
-        {/* Minimal Editorial Category Slot Pill */}
-        <div className="absolute top-3 left-3 pointer-events-none">
+        {/* Minimal Editorial Category Slot & Gender Pills */}
+        <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 pointer-events-none z-10 max-w-[calc(100%-48px)]">
           <span className="px-2.5 py-1 rounded-full text-[9px] font-mono uppercase tracking-[0.2em] bg-white/90 backdrop-blur-xs text-aura-espresso shadow-xs border border-aura-espresso/5">
             {product.standard_category ? product.standard_category.replace('_', ' ') : 'Piece'}
           </span>
+          <ProductGenderLabel product={product} />
         </div>
 
         {/* Direct Click Wishlist Heart Button */}
