@@ -77,7 +77,7 @@ export async function fetchSimilarItems(articleId, topK = 6, mode = 'hybrid', fi
   return Array.isArray(data) ? data : [];
 }
 
-export async function fetchOutfitRecommendations(anchorArticleId, gender = '', excludeIds = [], resynthesizeCount = 0, sizePreferences = null) {
+export async function fetchOutfitRecommendations(anchorArticleId, gender = '', excludeIds = [], resynthesizeCount = 0, sizePreferences = null, signal = null) {
   const payload = {
     anchor_article_id: anchorArticleId,
     resynthesize_count: resynthesizeCount,
@@ -88,10 +88,21 @@ export async function fetchOutfitRecommendations(anchorArticleId, gender = '', e
 
   const res = await fetch(`${BASE_URL}/recommendations/outfits`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Client-Id': localStorage.getItem('aura_active_user') || 'user_demo_01',
+    },
     body: JSON.stringify(payload),
+    signal: signal || undefined,
   });
-  if (!res.ok) throw new Error(`Failed to generate outfit: ${res.statusText}`);
+  if (!res.ok) {
+    if (res.status === 429) {
+      const errData = await res.json().catch(() => ({}));
+      const retrySec = errData.retry_after_seconds || 2;
+      throw new Error(`Rate limit reached. Please wait ${retrySec}s before synthesizing another look.`);
+    }
+    throw new Error(`Failed to generate outfit: ${res.statusText}`);
+  }
   return res.json();
 }
 
@@ -119,15 +130,19 @@ export async function fetchPersonalizedFeed(userId, topK = 12, recentViews = [],
 
 export async function recordInteraction(userId, articleId, interactionType, context = {}) {
   try {
+    const contextStr = typeof context === 'string' ? context : JSON.stringify(context);
     const res = await fetch(`${BASE_URL}/interactions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client-Id': userId || 'user_demo_01',
+      },
       body: JSON.stringify({
         user_id: userId,
         article_id: articleId,
         interaction_type: interactionType,
         session_id: 'session_' + userId,
-        context: context,
+        context: contextStr,
       }),
     });
     return res.ok;
@@ -206,5 +221,12 @@ export async function fetchSystemHealth() {
 export async function fetchSystemMetrics() {
   const res = await fetch(`${BASE_URL}/metrics?_t=${Date.now()}`);
   if (!res.ok) throw new Error('System metrics check failed');
+  return res.json();
+}
+
+export async function fetchActivityAudit(limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit), _t: String(Date.now()) });
+  const res = await fetch(`${BASE_URL}/audit/interactions?${params.toString()}`);
+  if (!res.ok) throw new Error('Activity audit log could not be loaded');
   return res.json();
 }

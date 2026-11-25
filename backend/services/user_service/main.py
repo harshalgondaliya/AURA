@@ -7,6 +7,7 @@ import os
 import sys
 import uuid
 import time
+import json
 from pathlib import Path
 from typing import List, Optional
 
@@ -15,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from fastapi import FastAPI, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.common.database import get_db
@@ -26,6 +28,21 @@ from backend.common.schemas import (
 from backend.common.redis_cache import cache
 
 app = FastAPI(title="Fashion User Service", version="1.0.0")
+
+
+def _audit_context(value):
+    """Return stored interaction context in a UI-friendly form."""
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
+
+
+def _audit_timestamp(value):
+    """Serialize naïve database timestamps as UTC so clients display local time correctly."""
+    return f"{value.isoformat()}Z" if value else None
 
 @app.get("/health", response_model=NodeHealth)
 def health_check(db: Session = Depends(get_db)):
@@ -71,12 +88,20 @@ def record_interaction(interaction_in: InteractionCreate, db: Session = Depends(
 
     ensure_product_exists(db, interaction_in.article_id)
 
+    context_val = interaction_in.context
+    if isinstance(context_val, dict):
+        context_val = json.dumps(context_val)
+    elif context_val is None:
+        context_val = "feed"
+    else:
+        context_val = str(context_val)
+
     interaction = UserInteraction(
         user_id=interaction_in.user_id,
         article_id=interaction_in.article_id,
         interaction_type=interaction_in.interaction_type,
         session_id=interaction_in.session_id,
-        context=interaction_in.context
+        context=context_val
     )
     db.add(interaction)
     db.commit()
@@ -86,6 +111,61 @@ def record_interaction(interaction_in: InteractionCreate, db: Session = Depends(
     cache.delete(f"rec:user:{interaction_in.user_id}")
     cache.delete(f"favs:user:{interaction_in.user_id}")
     return interaction
+
+
+@app.get("/audit/interactions")
+def get_interaction_audit_log(
+    limit: int = Query(default=50, ge=1, le=100),
+    user_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Return the newest persisted user actions with their audit context.
+
+    This endpoint is intended for the application's evaluator/operations view.
+    A production deployment should protect it with an administrator-only policy.
+    """
+    query = (
+        db.query(UserInteraction, Product)
+        .outerjoin(Product, Product.article_id == UserInteraction.article_id)
+    )
+    if user_id:
+        query = query.filter(UserInteraction.user_id == user_id)
+
+    action_counts = dict(
+        query.with_entities(UserInteraction.interaction_type, func.count(UserInteraction.id))
+        .group_by(UserInteraction.interaction_type)
+        .all()
+    )
+    total_events = query.with_entities(func.count(UserInteraction.id)).scalar() or 0
+    unique_users = query.with_entities(UserInteraction.user_id).distinct().count()
+    rows = query.order_by(UserInteraction.created_at.desc()).limit(limit).all()
+
+    events = []
+    for interaction, product in rows:
+        events.append({
+            "id": interaction.id,
+            "timestamp": _audit_timestamp(interaction.created_at),
+            "user_id": interaction.user_id,
+            "action": interaction.interaction_type,
+            "article_id": interaction.article_id,
+            "product_name": product.prod_name if product else None,
+            "product_type": product.product_type_name if product else None,
+            "category": product.standard_category if product else None,
+            "context": _audit_context(interaction.context),
+            "session_id": interaction.session_id,
+        })
+
+    return {
+        "events": events,
+        "summary": {
+            "total_events": total_events,
+            "displayed_events": len(events),
+            "unique_users": unique_users,
+            "action_breakdown": action_counts,
+            "latest_event_at": events[0]["timestamp"] if events else None,
+            "filtered_user_id": user_id,
+        },
+    }
 
 @app.get("/users/{user_id}/history", response_model=List[ProductResponse])
 def get_user_history(
@@ -187,6 +267,11 @@ def remove_favorite(user_id: str, article_id: str, db: Session = Depends(get_db)
 @app.post("/outfits/save", status_code=status.HTTP_201_CREATED)
 def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):
     """Feature B & C: Save a complete outfit look with garment sizes."""
+    user = db.query(User).filter(User.user_id == req.user_id).first()
+    if not user:
+        db.add(User(user_id=req.user_id))
+        db.commit()
+
     ensure_product_exists(db, req.anchor_article_id)
     outfit_uuid = f"outfit_{uuid.uuid4().hex[:12]}"
     outfit = SavedOutfit(
@@ -237,7 +322,21 @@ def save_outfit(req: SaveOutfitRequest, db: Session = Depends(get_db)):
             selected_size=chosen_sz
         )
         db.add(item)
+
+    db.add(UserInteraction(
+        user_id=req.user_id,
+        article_id=req.anchor_article_id,
+        interaction_type="save",
+        session_id=f"session_{req.user_id}",
+        context=json.dumps({
+            "feature": "outfit_studio",
+            "outfit_id": outfit_uuid,
+            "outfit_name": req.outfit_name,
+            "item_count": len(all_items_to_save),
+        }),
+    ))
     db.commit()
+    cache.delete(f"rec:user:{req.user_id}")
     return {"outfit_id": outfit_uuid, "message": "Outfit saved successfully!"}
 
 @app.get("/users/{user_id}/outfits")

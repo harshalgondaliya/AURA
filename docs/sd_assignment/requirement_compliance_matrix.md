@@ -1,4 +1,6 @@
-# AURA — Professor's Software Development Assignment Compliance Matrix
+# AURA — Historical Software Development Assignment Compliance Matrix
+
+> **Superseded on 23 November 2026.** This document contains historical claims that were not independently reproduced in its original form. Use the root-level [SD_REQUIREMENT_COMPLIANCE_MATRIX.md](../../SD_REQUIREMENT_COMPLIANCE_MATRIX.md) and [SD_TEST_VERIFICATION_REPORT.md](../../SD_TEST_VERIFICATION_REPORT.md) for the current evidence-backed audit. In particular, do not rely on its “100% compliant” verdict or historical benchmark figures as current proof.
 
 **Project**: AURA — Intelligent Fashion Recommendation Platform  
 **Evaluation Target**: Full Academic Project Compliance (Stages 1, 2, 3 + ML Integration)  

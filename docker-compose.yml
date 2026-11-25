@@ -1,3 +1,5 @@
+name: aura
+
 services:
   # Primary Relational Persistence
   postgres:
@@ -25,7 +27,7 @@ services:
     container_name: fashion_redis
     restart: always
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -44,8 +46,6 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
       REDIS_URL: redis://redis:6379/0
-    ports:
-      - "8001:8001"
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,8 +62,6 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
       REDIS_URL: redis://redis:6379/0
-    ports:
-      - "8002:8002"
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,8 +78,6 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
       REDIS_URL: redis://redis:6379/0
-    ports:
-      - "8003:8003"
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,6 +113,8 @@ services:
       USER_SERVICE_URL: http://user_service:8003
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-fashion_db}
       REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_CAPACITY: ${RATE_LIMIT_CAPACITY:-120}
+      RATE_LIMIT_REFILL_RATE: ${RATE_LIMIT_REFILL_RATE:-2.0}
     ports:
       - "8000:8000"
     volumes:

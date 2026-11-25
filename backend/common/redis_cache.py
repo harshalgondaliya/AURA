@@ -203,6 +203,16 @@ class CacheManager:
         except Exception:
             return True, capacity
 
+    def health_status(self) -> str:
+        """Return the current Redis connectivity state without treating a mock as Redis."""
+        if not self.is_connected:
+            return "DEGRADED (in-memory fallback)"
+        try:
+            self.client.ping()
+            return "UP"
+        except Exception:
+            return "DOWN"
+
     # --- Asynchronous Queue Operations ---
     def push_queue(self, queue_name: str, item: Any) -> bool:
         """Pushes serialized task payload to Redis queue."""

@@ -16,9 +16,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from fastapi import FastAPI, Request, Response, HTTPException, status, Query
+from fastapi import FastAPI, Request, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import httpx
 import numpy as np
@@ -27,7 +27,7 @@ from backend.common.redis_cache import cache
 from backend.common.circuit_breaker import CircuitBreaker
 from backend.common.database import SessionLocal
 from backend.common.models import RecommendationJob
-from backend.workers.tasks import submit_async_recommendation_job
+from backend.workers.tasks import TaskQueueUnavailable, submit_async_recommendation_job
 
 # Downstream Service URLs (Configurable via Environment variables)
 PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8001")
@@ -79,15 +79,22 @@ async def gateway_middleware(request: Request, call_next):
     
     # 1. Generate or extract X-Request-ID
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request.state.request_id = request_id
     
-    # 2. Identify client (Header or IP)
-    client_ip = request.headers.get("X-Client-Id") or (request.client.host if request.client else "127.0.0.1")
+    # 2. Identify client (Header or IP, supporting reverse proxy headers)
+    client_ip = (
+        request.headers.get("X-Client-Id")
+        or request.headers.get("X-Real-IP")
+        or (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() if request.headers.get("X-Forwarded-For") else None)
+        or (request.client.host if request.client else "127.0.0.1")
+    )
     
     # Skip rate limiting for static /health, /metrics, docs and /images endpoints
     if not request.url.path.startswith(("/health", "/metrics", "/docs", "/openapi.json", "/images")):
-        # Rate Limiting: Configurable Token Bucket (default 60 req burst, 0.5 req/sec refill)
-        capacity = int(request.headers.get("x-test-ratelimit-capacity") or os.getenv("RATE_LIMIT_CAPACITY", "60"))
-        refill_rate = float(request.headers.get("x-test-ratelimit-refill") or os.getenv("RATE_LIMIT_REFILL_RATE", "0.5"))
+        # Rate Limiting: configuration is server-side so callers cannot raise
+        # their own allowance with an HTTP header.
+        capacity = int(os.getenv("RATE_LIMIT_CAPACITY", "120"))
+        refill_rate = float(os.getenv("RATE_LIMIT_REFILL_RATE", "2.0"))
         allowed, remaining_tokens = cache.check_rate_limit(client_id=client_ip, capacity=capacity, refill_rate=refill_rate)
         if not allowed:
             METRICS["status_429"] += 1
@@ -155,7 +162,18 @@ async def forward_request(service_url: str, path: str, request: Request, breaker
                 headers=headers,
                 content=body
             )
-            return JSONResponse(status_code=res.status_code, content=res.json())
+            # Preserve downstream status and safe response headers.  Some valid
+            # downstream responses may not be JSON, so proxy their raw body too.
+            response_headers = {
+                key: value for key, value in res.headers.items()
+                if key.lower() not in {"content-length", "connection", "transfer-encoding"}
+            }
+            return Response(
+                content=res.content,
+                status_code=res.status_code,
+                headers=response_headers,
+                media_type=None,
+            )
             
     def _fallback(*args, **kwargs):
         METRICS["circuit_breaker_trips"] += 1
@@ -201,18 +219,27 @@ async def route_users(rest_of_path: str, request: Request):
 async def route_interactions(request: Request):
     return await forward_request(USER_SERVICE_URL, "/interactions", request, breaker_user)
 
+@app.get("/api/audit/interactions")
+async def route_interaction_audit(request: Request):
+    return await forward_request(USER_SERVICE_URL, "/audit/interactions", request, breaker_user)
+
 @app.post("/api/outfits/save")
 async def route_save_outfit(request: Request):
     return await forward_request(USER_SERVICE_URL, "/outfits/save", request, breaker_user)
 
 # --- Routing: Asynchronous Recommendation Jobs (Requirement Group 2.C) ---
 @app.post("/api/jobs/recommendations", status_code=status.HTTP_202_ACCEPTED)
-async def submit_job(payload: Dict[str, Any]):
+async def submit_job(payload: Dict[str, Any], request: Request):
     """Accepts expensive recommendation synthesis task and pushes to background worker queue."""
     user_id = payload.get("user_id", "user_demo_01")
     job_type = payload.get("job_type", "outfit_synthesis")
     
-    job_id = submit_async_recommendation_job(user_id=user_id, job_type=job_type, payload=payload)
+    job_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else dict(payload)
+    job_payload["request_id"] = request.state.request_id
+    try:
+        job_id = submit_async_recommendation_job(user_id=user_id, job_type=job_type, payload=job_payload)
+    except TaskQueueUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     return {
         "job_id": job_id,
         "status": "pending",
@@ -274,9 +301,10 @@ async def aggregated_health():
         db_status = "DOWN"
 
     # Dependency check: Cache
-    cache_status = "UP" if cache.is_connected or isinstance(cache.client, cache.__class__) else "UP (Mock)"
+    cache_status = cache.health_status()
 
-    overall_status = "HEALTHY" if all(s.get("status") == "UP" for s in services.values()) else "DEGRADED"
+    all_dependencies_up = db_status == "UP" and cache_status == "UP"
+    overall_status = "HEALTHY" if all(s.get("status") == "UP" for s in services.values()) and all_dependencies_up else "DEGRADED"
 
     return {
         "status": overall_status,

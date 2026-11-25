@@ -7,6 +7,7 @@ import os
 import sys
 import time
 import json
+import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -274,10 +275,13 @@ def get_outfit_recommendations(
     exclude_ids = set(str(x) for x in payload.get("exclude_ids", []))
     exclude_ids.add(anchor_id)
     resynthesize_count = int(payload.get("resynthesize_count", 0))
+    candidate_window = int(payload.get("candidate_window", 1000))
     size_preferences = payload.get("size_preferences", {})
 
     size_cache_str = "_".join(f"{k}:{v}" for k, v in sorted(size_preferences.items())) if size_preferences else "none"
-    cache_key = f"rec:outfit:{anchor_id}:g{target_gender}:r{resynthesize_count}:sz{size_cache_str}"
+    ex_hash = hashlib.md5(",".join(sorted(exclude_ids)).encode()).hexdigest()[:8] if exclude_ids else "none"
+    cw_str = f":cw{candidate_window}" if candidate_window != 1000 else ""
+    cache_key = f"rec:outfit:{anchor_id}:g{target_gender}:r{resynthesize_count}:ex{ex_hash}:sz{size_cache_str}{cw_str}"
     cached = cache.get_json(cache_key)
     if cached:
         return cached
@@ -305,6 +309,7 @@ def get_outfit_recommendations(
     outfit_slots = {}
     chosen_aids_in_outfit = set()
     total_harmony = 0.0
+    slots_with_unseen = 0
 
     for slot_idx, slot in enumerate(needed_slots):
         target_slot_cat = "accessories" if slot == "accessories_2" else slot
@@ -313,11 +318,13 @@ def get_outfit_recommendations(
         if not candidates:
             candidates = slot_candidates.get((target_slot_cat, "all"), popular_articles)
 
-        # 2. Score candidates by color harmony with anchor & slot size constraints
-        scored_candidates = []
+        # 2. Strict Partition: unseen candidates vs already-seen candidates to guarantee 100% diversity
+        unseen_candidates = []
+        seen_fallback = []
         pref_size = size_preferences.get(slot) or size_preferences.get(target_slot_cat)
 
-        for cid in candidates[:150]:
+        candidate_window = int(payload.get("candidate_window", 1000))
+        for cid in candidates[:candidate_window]:
             if cid in chosen_aids_in_outfit or cid == anchor_id:
                 continue
             cmeta = article_meta.get(cid, {})
@@ -332,40 +339,50 @@ def get_outfit_recommendations(
                 continue
             
             base_score = color_harmony(anchor_color, cmeta.get("colour_group_name", "Black"))
-            # Apply severe penalty if product was already displayed in recent session history
-            adjusted_score = base_score - 0.40 if cid in exclude_ids else base_score
+            adjusted_score = base_score
 
-            # Size-aware candidate ranking: prefer products documented with user's preferred size
+            # Size-aware candidate ranking: bonus if preferred size is available
             if pref_size:
                 c_sizes = article_sizes.get(cid, {}).get("sizes", [])
                 if pref_size in c_sizes:
-                    adjusted_score += 0.20
-                else:
-                    adjusted_score -= 0.35
+                    adjusted_score += 0.15
 
-            scored_candidates.append((cid, adjusted_score, base_score))
-
-        # Sort by adjusted compatibility score
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
-
-        # 3. Intelligent Diversity Selection (MMR / Controlled Exploration)
-        if scored_candidates:
-            top_pool = [c for c in scored_candidates if c[1] >= 0.70]
-            if not top_pool:
-                top_pool = scored_candidates[:10]
+            if cid in exclude_ids:
+                seen_fallback.append((cid, adjusted_score, base_score))
             else:
-                top_pool = top_pool[:15]
+                unseen_candidates.append((cid, adjusted_score, base_score))
 
-            # Use deterministic offset based on resynthesize_count and slot_idx to cycle through distinct compatible pieces
-            pick_idx = (resynthesize_count * 3 + slot_idx * 5) % len(top_pool)
+        if unseen_candidates:
+            slots_with_unseen += 1
+
+        # Sort candidate pools by score descending
+        unseen_candidates.sort(key=lambda x: x[1], reverse=True)
+        seen_fallback.sort(key=lambda x: x[1], reverse=True)
+
+        # 3. Intelligent Diversity Selection
+        # Primary pool: unseen candidates that have NEVER appeared in previous looks
+        pool_to_use = unseen_candidates if unseen_candidates else seen_fallback
+
+        if pool_to_use:
+            # Filter to harmonious items (score >= 0.70) or top 30
+            high_compat = [c for c in pool_to_use if c[1] >= 0.70]
+            top_pool = high_compat if len(high_compat) >= 3 else pool_to_use[:30]
+
+            # Deterministic, non-repeating cycle through distinct pieces
+            pick_idx = (resynthesize_count * 2 + slot_idx * 3) % len(top_pool)
             pick_cid, _, final_score = top_pool[pick_idx]
         else:
             pick_cid = None
             for c in candidates:
-                if c not in chosen_aids_in_outfit and c != anchor_id:
+                if c not in chosen_aids_in_outfit and c != anchor_id and c not in exclude_ids:
                     cm = article_meta.get(c, {})
                     cg = cm.get("normalized_gender", "Unisex")
                     if (target_gender == "Men" and cg in ("Men", "Unisex")) or (target_gender == "Women" and cg in ("Women", "Unisex")):
+                        pick_cid = c
+                        break
+            if not pick_cid:
+                for c in candidates:
+                    if c not in chosen_aids_in_outfit and c != anchor_id:
                         pick_cid = c
                         break
             if not pick_cid:
@@ -373,6 +390,7 @@ def get_outfit_recommendations(
             final_score = 0.85
 
         chosen_aids_in_outfit.add(pick_cid)
+        exclude_ids.add(pick_cid)
         total_harmony += final_score
 
         pmeta = article_meta.get(pick_cid, {})
@@ -402,6 +420,9 @@ def get_outfit_recommendations(
     a_sizes = a_info.get("sizes", [])
     anchor_chosen_size = size_preferences.get("anchor") or (a_sizes[0] if a_sizes else None)
 
+    # Candidate exhaustion check: if resynthesizing and all slots were forced to fall back to already-seen items
+    is_exhausted = (len(payload.get("exclude_ids", [])) > 0 and slots_with_unseen == 0)
+
     response = OutfitResponse(
         anchor=OutfitSlotItem(
             article_id=anchor_id,
@@ -420,7 +441,9 @@ def get_outfit_recommendations(
         ),
         slots=outfit_slots,
         overall_score=overall_score,
-        selected_sizes=size_preferences
+        selected_sizes=size_preferences,
+        exhausted=is_exhausted,
+        message="No more distinct looks available for these preferences." if is_exhausted else None
     )
 
     cache.set_json(cache_key, response.dict(), ttl_seconds=300)

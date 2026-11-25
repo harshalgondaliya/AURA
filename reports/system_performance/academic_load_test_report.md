@@ -1,4 +1,6 @@
-# Academic Load Testing & System Performance Report
+# Historical Academic Load Testing & System Performance Report
+
+> **Historical, not current evidence.** The current, reproducible live-gateway results and constraints are in [SD_LOAD_TEST_REPORT.md](../../SD_LOAD_TEST_REPORT.md). Do not present the measurements in this file as newly verified without rerunning its methodology.
 
 **Course / Subject**: Software Development & Distributed Systems  
 **Project**: AURA — Intelligent Fashion Recommendation Platform  

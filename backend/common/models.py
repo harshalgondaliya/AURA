@@ -92,7 +92,7 @@ class UserInteraction(Base):
     article_id = Column(String(16), ForeignKey("products.article_id", ondelete="CASCADE"), nullable=False, index=True)
     interaction_type = Column(String(32), nullable=False, index=True) # view, like, save, click, dismiss, purchase
     session_id = Column(String(64), nullable=True)
-    context = Column(String(64), default="feed")
+    context = Column(Text, default="feed")
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
     user = relationship("User", back_populates="interactions")

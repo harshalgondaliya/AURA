@@ -4,11 +4,28 @@ import {
   RefreshCw, BarChart3, Zap, Layers, Network, Terminal, Clock,
   FileCode2, Box, ArrowRight, ArrowLeft, Check
 } from 'lucide-react';
-import { fetchSystemHealth, fetchSystemMetrics } from '../services/api';
+import { fetchActivityAudit, fetchSystemHealth, fetchSystemMetrics } from '../services/api';
+
+function formatAuditTimestamp(value) {
+  if (!value) return '—';
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return value;
+  return timestamp.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  });
+}
+
+function formatAuditContext(context) {
+  if (context === null || context === undefined || context === '') return '—';
+  return typeof context === 'string' ? context : JSON.stringify(context);
+}
 
 export default function SystemArchitectureView({ onBackToShopping }) {
   const [healthData, setHealthData] = useState(null);
   const [metricsData, setMetricsData] = useState(null);
+  const [auditData, setAuditData] = useState(null);
+  const [auditError, setAuditError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('overview');
   const [lastPolled, setLastPolled] = useState(null);
@@ -20,8 +37,9 @@ export default function SystemArchitectureView({ onBackToShopping }) {
 
   const loadLiveTelemetry = async () => {
     setLoading(true);
+    setAuditError(null);
     try {
-      const [health, metrics] = await Promise.all([
+      const [health, metrics, audit] = await Promise.all([
         fetchSystemHealth().catch((e) => {
           console.warn('Health fetch error:', e);
           return null;
@@ -30,9 +48,15 @@ export default function SystemArchitectureView({ onBackToShopping }) {
           console.warn('Metrics fetch error:', e);
           return null;
         }),
+        fetchActivityAudit().catch((e) => {
+          console.warn('Activity audit fetch error:', e);
+          setAuditError('The user activity log is temporarily unavailable.');
+          return null;
+        }),
       ]);
       if (health) setHealthData(health);
       if (metrics) setMetricsData(metrics);
+      if (audit) setAuditData(audit);
       setLastPolled(new Date().toLocaleTimeString());
       setPollCount((prev) => prev + 1);
     } catch (err) {
@@ -59,7 +83,14 @@ export default function SystemArchitectureView({ onBackToShopping }) {
     { id: 'gateway_limits', label: '3. Gateway & Token Bucket' },
     { id: 'database_cache', label: '4. PostgreSQL & Redis' },
     { id: 'benchmarks', label: '5. Load Tests & Telemetry' },
+    { id: 'observability', label: '6. Metrics & User Activity Logs' },
   ];
+
+  const auditEvents = auditData?.events || [];
+  const auditSummary = auditData?.summary || {};
+  const totalRequests = metricsData?.total_requests ?? 0;
+  const http200Responses = metricsData?.status_200 ?? 0;
+  const http200Rate = totalRequests > 0 ? `${((http200Responses / totalRequests) * 100).toFixed(1)}%` : '—';
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 animate-in fade-in duration-200 space-y-12">
@@ -371,6 +402,107 @@ export default function SystemArchitectureView({ onBackToShopping }) {
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {/* 6. Live Metrics & Persisted User Activity Audit Trail */}
+      {(activeSection === 'overview' || activeSection === 'observability') && (
+        <section className="bg-white rounded-3xl p-6 sm:p-8 border border-aura-espresso/8 shadow-aura-subtle space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-aura-espresso/8 pb-3">
+            <div>
+              <h2 className="text-xl font-serif text-aura-espresso flex items-center gap-2">
+                <Activity className="w-5 h-5 text-aura-olive" />
+                <span>Live Metrics & User Activity Audit Trail</span>
+              </h2>
+              <p className="text-xs text-aura-muted mt-1">
+                Gateway health and the latest persisted user actions, including when an action occurred, who performed it, and its item, context, and session details.
+              </p>
+            </div>
+            <div className="self-start rounded-full bg-aura-cream px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-aura-olive border border-aura-espresso/10">
+              {auditSummary.displayed_events ?? 0} newest events{auditSummary.total_events ? ` of ${auditSummary.total_events}` : ''}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+            {[
+              { label: 'Gateway requests', value: totalRequests.toLocaleString(), detail: 'Since last gateway restart' },
+              { label: 'HTTP 200 responses', value: http200Responses.toLocaleString(), detail: `${http200Rate} of requests` },
+              { label: 'Rate limited', value: (metricsData?.status_429_rate_limited ?? 0).toLocaleString(), detail: 'HTTP 429 responses' },
+              { label: 'Server errors', value: (metricsData?.status_500_errors ?? 0).toLocaleString(), detail: 'HTTP 5xx responses' },
+              { label: 'p95 latency', value: `${metricsData?.latency_summary_ms?.p95 ?? 0} ms`, detail: 'Rolling request window' },
+              { label: 'Active users', value: (auditSummary.unique_users ?? 0).toLocaleString(), detail: 'Users in audit log' },
+            ].map((metric) => (
+              <div key={metric.label} className="rounded-2xl border border-aura-espresso/8 bg-aura-ivory p-4 space-y-1">
+                <p className="text-[10px] font-mono uppercase tracking-wider text-aura-muted">{metric.label}</p>
+                <p className="text-xl font-serif text-aura-espresso">{metric.value}</p>
+                <p className="text-[10px] text-aura-muted leading-snug">{metric.detail}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-aura-muted">
+            <Clock className="w-3.5 h-3.5 text-aura-olive" />
+            <span>Latest recorded action: {formatAuditTimestamp(auditSummary.latest_event_at)}</span>
+            <span className="text-aura-espresso/25">•</span>
+            <span>{auditSummary.unique_users ?? 0} unique user{auditSummary.unique_users === 1 ? '' : 's'}</span>
+            {Object.entries(auditSummary.action_breakdown || {}).map(([action, count]) => (
+              <span key={action} className="rounded-full bg-aura-cream px-2 py-0.5 text-aura-espresso">
+                {action}: {count}
+              </span>
+            ))}
+          </div>
+
+          {auditError ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+              {auditError} Use “Poll Live Health” to try again.
+            </div>
+          ) : auditEvents.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-aura-espresso/15 bg-aura-ivory/60 px-5 py-8 text-center">
+              <Terminal className="w-5 h-5 text-aura-olive mx-auto mb-2" />
+              <p className="text-sm font-serif text-aura-espresso">No user actions recorded yet</p>
+              <p className="text-xs text-aura-muted mt-1">Product views, favorites, dismissals, and saved outfits will appear here with their timestamp.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-aura-espresso/8">
+              <table className="w-full min-w-[980px] text-left text-xs">
+                <thead className="bg-aura-cream text-aura-espresso font-mono uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3">When</th>
+                    <th className="px-4 py-3">User</th>
+                    <th className="px-4 py-3">Action</th>
+                    <th className="px-4 py-3">Item</th>
+                    <th className="px-4 py-3">Context</th>
+                    <th className="px-4 py-3">Session</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-aura-espresso/6">
+                  {auditEvents.map((event) => (
+                    <tr key={event.id} className="align-top hover:bg-aura-cream/30 transition-colors">
+                      <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap text-aura-muted">
+                        {formatAuditTimestamp(event.timestamp)}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-aura-espresso">{event.user_id}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-full bg-aura-cream px-2 py-1 font-mono text-[10px] uppercase text-aura-olive">
+                          {event.action}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-aura-espresso">
+                        <p className="font-medium">{event.product_name || `Article ${event.article_id}`}</p>
+                        <p className="mt-0.5 font-mono text-[10px] text-aura-muted">
+                          {event.article_id}{event.category ? ` • ${event.category}` : ''}
+                        </p>
+                      </td>
+                      <td className="max-w-xs px-4 py-3 font-mono text-[10px] leading-relaxed text-aura-muted break-words">
+                        {formatAuditContext(event.context)}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-[10px] text-aura-muted">{event.session_id || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 

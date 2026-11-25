@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useReducer, useRef } from 'react';
 import {
   Layers,
   Sparkles,
@@ -17,6 +17,12 @@ import ProductImagePlaceholder from './ProductImagePlaceholder';
 import ProductGenderLabel from './ProductGenderLabel';
 import { formatProductPrice } from '../utils/formatters';
 import { useWishlist } from '../context/WishlistContext';
+import {
+  ACTIONS,
+  INITIAL_STATE,
+  outfitHistoryReducer,
+  extractSizesFromData,
+} from '../utils/outfitHistoryMachine';
 
 export default function OutfitStudio({
   anchorProduct,
@@ -27,35 +33,25 @@ export default function OutfitStudio({
   onToast,
   globalGender = 'all',
 }) {
-  const [loading, setLoading] = useState(false);
-  const [outfitData, setOutfitData] = useState(null);
-  const [isSaved, setIsSaved] = useState(false);
+  const [state, dispatch] = useReducer(outfitHistoryReducer, INITIAL_STATE);
   const [saving, setSaving] = useState(false);
   const [failedImages, setFailedImages] = useState({});
-
-  // History & Diversity State
-  const [history, setHistory] = useState([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [resynthesizeCount, setResynthesizeCount] = useState(0);
-  const [selectedSizes, setSelectedSizes] = useState({});
   const [studioGender, setStudioGender] = useState(() => {
     return globalGender || localStorage.getItem('aura_catalog_gender') || 'all';
   });
 
-  const extractSizesFromData = (data) => {
-    const s = {};
-    if (data?.anchor) {
-      s.anchor = data.anchor.selected_size || (Array.isArray(data.anchor.sizes) && data.anchor.sizes.length > 0 ? data.anchor.sizes[0] : '');
-    }
-    if (data?.slots) {
-      Object.entries(data.slots).forEach(([k, item]) => {
-        s[k] = item.selected_size || (Array.isArray(item.sizes) && item.sizes.length > 0 ? item.sizes[0] : '');
-      });
-    }
-    return s;
-  };
+  // Request Synchronization & Race Condition Guards (Phase 7)
+  const activeRequestRef = useRef(0);
+  const abortControllerRef = useRef(null);
 
-  // Consume centralized WishlistContext with safe fallback
+  const anchorId = anchorProduct?.article_id;
+  const currentContextKey = `${anchorId || ''}:${studioGender}`;
+
+  // Keep ref to latest state machine snapshot to decouple initial load effect from generation state changes
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Centralized WishlistContext with safe fallback
   let wishlistCtx = null;
   try {
     wishlistCtx = useWishlist();
@@ -63,63 +59,116 @@ export default function OutfitStudio({
     // Rendered outside provider
   }
 
-  // Load initial outfit when anchor changes or studioGender changes
+  // Load initial outfit strictly when anchor product ID or studio gender changes
   useEffect(() => {
-    if (anchorProduct) {
-      loadInitialOutfit(anchorProduct.article_id, studioGender);
+    if (!anchorId) return;
+
+    const s = stateRef.current;
+    const ctxKey = `${anchorId}:${studioGender}`;
+
+    // History Preservation Guard: Never wipe history if this anchor piece and gender are already active
+    if (s.anchorProductId === anchorId && s.contextKey === ctxKey && s.history.length > 0) {
+      return;
     }
-  }, [anchorProduct, studioGender]);
+
+    loadInitialOutfit(anchorId, studioGender);
+
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [anchorId, studioGender]);
+
+  // Keyboard navigation support: Left Arrow = Previous, Right Arrow = Next (Phase 9)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      if (e.key === 'ArrowLeft') {
+        if (state.activeIndex > 0 && !state.isGenerating) {
+          e.preventDefault();
+          dispatch({ type: ACTIONS.GO_PREVIOUS });
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (state.activeIndex < state.history.length - 1 && !state.isGenerating) {
+          e.preventDefault();
+          dispatch({ type: ACTIONS.GO_NEXT });
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [state.activeIndex, state.history.length, state.isGenerating]);
 
   const loadInitialOutfit = async (aid, gender) => {
-    setLoading(true);
-    setIsSaved(false);
+    // Abort any in-flight request to eliminate race conditions
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const reqId = ++activeRequestRef.current;
+    const ctxKey = `${aid}:${gender}`;
+
+    dispatch({
+      type: ACTIONS.RESET_CONTEXT,
+      payload: { anchorProductId: aid, gender },
+    });
     setFailedImages({});
+
     try {
-      const data = await fetchOutfitRecommendations(aid, gender, [], 0);
+      const data = await fetchOutfitRecommendations(aid, gender, [], 0, null, controller.signal);
+      if (reqId !== activeRequestRef.current) return;
+
       const initialSizes = extractSizesFromData(data);
       if (anchorProduct?.selected_size) {
         initialSizes.anchor = anchorProduct.selected_size;
       }
-      setSelectedSizes(initialSizes);
       const lookWithSizes = { ...data, selected_sizes: initialSizes };
-      setOutfitData(lookWithSizes);
-      setHistory([lookWithSizes]);
-      setHistoryIndex(0);
-      setResynthesizeCount(0);
+
+      dispatch({
+        type: ACTIONS.GENERATION_SUCCEEDED,
+        payload: { look: lookWithSizes, contextKey: ctxKey },
+      });
+
       recordInteraction(activeUser, aid, 'view', { feature: 'outfit_studio' });
     } catch (err) {
+      if (err.name === 'AbortError') return;
+      if (reqId !== activeRequestRef.current) return;
       console.error(err);
+      dispatch({
+        type: ACTIONS.GENERATION_FAILED,
+        payload: { error: err.message, contextKey: ctxKey },
+      });
       onToast && onToast('Unable to synthesize outfit ensemble', 'error');
-    } finally {
-      setLoading(false);
     }
   };
 
   const handleSizeChange = (key, sz) => {
-    setSelectedSizes((prev) => {
-      const updated = { ...prev, [key]: sz };
-      setHistory((prevHist) => {
-        const copy = [...prevHist];
-        if (copy[historyIndex]) {
-          copy[historyIndex] = {
-            ...copy[historyIndex],
-            selected_sizes: updated,
-          };
-        }
-        return copy;
-      });
-      return updated;
+    dispatch({
+      type: ACTIONS.UPDATE_SIZE,
+      payload: { key, size: sz },
     });
   };
 
   const handleResynthesize = async () => {
-    if (!anchor || loading) return;
-    setLoading(true);
-    setIsSaved(false);
+    if (!anchorId || state.isGenerating) return;
+
+    // Abort pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const reqId = ++activeRequestRef.current;
+    const ctxKey = currentContextKey;
+
+    dispatch({ type: ACTIONS.GENERATION_STARTED });
+
     try {
-      // Gather all product IDs seen in previous looks to guarantee diverse, non-repeating looks
+      // Gather all product IDs across all looks currently in history to guarantee non-repeating looks
       const seenIds = new Set();
-      history.forEach((look) => {
+      state.history.forEach((look) => {
         if (look?.slots) {
           Object.values(look.slots).forEach((s) => {
             if (s?.article_id) seenIds.add(s.article_id);
@@ -127,67 +176,79 @@ export default function OutfitStudio({
         }
       });
 
-      const nextCount = resynthesizeCount + 1;
+      const nextCount = state.history.length;
+      // Preserve anchor size preference if selected
+      const currentSizes = state.history[state.activeIndex]?.selected_sizes || {};
+      const anchorSize = currentSizes.anchor || anchorProduct?.selected_size;
+      const resynthSizePrefs = anchorSize ? { anchor: anchorSize } : {};
+
       const nextData = await fetchOutfitRecommendations(
-        anchor.article_id,
+        anchorId,
         studioGender,
         Array.from(seenIds),
         nextCount,
-        selectedSizes
+        resynthSizePrefs,
+        controller.signal
       );
 
-      const nextSizes = extractSizesFromData(nextData);
-      const mergedSizes = { ...selectedSizes, ...nextSizes };
-      setSelectedSizes(mergedSizes);
-      const lookWithSizes = { ...nextData, selected_sizes: mergedSizes };
+      if (reqId !== activeRequestRef.current) return;
 
-      setOutfitData(lookWithSizes);
-      setHistory((prev) => [...prev, lookWithSizes]);
-      setHistoryIndex(history.length);
-      setResynthesizeCount(nextCount);
-      onToast && onToast(`Synthesized Look ${history.length + 1}`, 'info');
+      if (nextData.exhausted) {
+        dispatch({
+          type: ACTIONS.GENERATION_SUCCEEDED,
+          payload: { look: nextData, contextKey: ctxKey },
+        });
+        onToast && onToast(nextData.message || 'No more distinct looks available for these preferences.', 'info');
+        return;
+      }
+
+      const nextSizes = extractSizesFromData(nextData);
+      if (anchorSize) {
+        nextSizes.anchor = anchorSize;
+      }
+      const lookWithSizes = { ...nextData, selected_sizes: nextSizes };
+
+      dispatch({
+        type: ACTIONS.GENERATION_SUCCEEDED,
+        payload: { look: lookWithSizes, contextKey: ctxKey },
+      });
+
+      onToast && onToast(`Synthesized Look ${nextCount + 1}`, 'info');
     } catch (err) {
+      if (err.name === 'AbortError') return;
+      if (reqId !== activeRequestRef.current) return;
       console.error(err);
-      onToast && onToast('Unable to resynthesize alternative look', 'error');
-    } finally {
-      setLoading(false);
+      dispatch({
+        type: ACTIONS.GENERATION_FAILED,
+        payload: { error: err.message, contextKey: ctxKey },
+      });
+      onToast && onToast(err.message || 'Unable to resynthesize alternative look', 'error');
     }
   };
 
   const handlePreviousLook = () => {
-    if (historyIndex > 0) {
-      const prevIdx = historyIndex - 1;
-      const prevLook = history[prevIdx];
-      setHistoryIndex(prevIdx);
-      setOutfitData(prevLook);
-      if (prevLook.selected_sizes) {
-        setSelectedSizes(prevLook.selected_sizes);
-      }
-      setIsSaved(false);
-    }
+    if (state.activeIndex <= 0 || state.isGenerating) return;
+    dispatch({ type: ACTIONS.GO_PREVIOUS });
   };
 
   const handleNextLook = () => {
-    if (historyIndex < history.length - 1) {
-      const nextIdx = historyIndex + 1;
-      const nextLook = history[nextIdx];
-      setHistoryIndex(nextIdx);
-      setOutfitData(nextLook);
-      if (nextLook.selected_sizes) {
-        setSelectedSizes(nextLook.selected_sizes);
-      }
-      setIsSaved(false);
-    }
+    if (state.activeIndex >= state.history.length - 1 || state.isGenerating) return;
+    dispatch({ type: ACTIONS.GO_NEXT });
   };
 
+  const currentLook = state.history[state.activeIndex] || null;
+  const anchor = currentLook?.anchor || anchorProduct;
+  const slots = currentLook?.slots || {};
+  const selectedSizes = currentLook?.selected_sizes || {};
+
   const handleSaveOutfit = async () => {
-    if (!outfitData) return;
+    if (!currentLook || state.isSaved || saving) return;
     setSaving(true);
     try {
-      const itemIds = Object.values(outfitData.slots).map((s) => s.article_id);
-      const outfitName = `Look: ${outfitData.anchor.prod_name} Ensemble`;
-      await saveOutfit(activeUser, outfitName, outfitData.anchor.article_id, itemIds, selectedSizes);
-      setIsSaved(true);
+      const itemIds = Object.values(currentLook.slots || {}).map((s) => s.article_id);
+      const outfitName = `Look: ${currentLook.anchor?.prod_name || 'Ensemble'} Ensemble`;
+      await saveOutfit(activeUser, outfitName, currentLook.anchor?.article_id, itemIds, selectedSizes);
+      dispatch({ type: ACTIONS.SET_SAVED, payload: true });
       onToast && onToast('Ensemble saved to your portfolio', 'success');
     } catch (err) {
       console.error(err);
@@ -201,7 +262,7 @@ export default function OutfitStudio({
     setFailedImages((prev) => ({ ...prev, [id]: true }));
   };
 
-  if (!anchorProduct && !outfitData) {
+  if (!anchorProduct && !currentLook) {
     return (
       <div className="max-w-4xl mx-auto py-24 px-4 text-center animate-in fade-in space-y-6">
         <div className="w-16 h-16 rounded-3xl bg-aura-cream text-aura-espresso border border-aura-espresso/10 flex items-center justify-center mx-auto shadow-aura-subtle">
@@ -231,8 +292,6 @@ export default function OutfitStudio({
     );
   }
 
-  const anchor = outfitData?.anchor || anchorProduct;
-  const slots = outfitData?.slots || {};
   const isAnchorLiked = wishlistCtx && anchor ? wishlistCtx.isWishlisted(anchor.article_id) : false;
 
   return (
@@ -281,12 +340,12 @@ export default function OutfitStudio({
               ))}
             </div>
 
-            {/* Previous Look */}
+            {/* Previous Look (←) */}
             <button
               onClick={handlePreviousLook}
-              disabled={historyIndex <= 0 || loading}
+              disabled={state.activeIndex <= 0 || state.isGenerating}
               className="p-2 sm:px-3 sm:py-2 bg-aura-cream hover:bg-aura-taupe/30 active:bg-aura-taupe/50 disabled:opacity-30 disabled:cursor-not-allowed text-aura-espresso rounded-full text-xs font-medium uppercase tracking-wider transition-all flex items-center gap-1"
-              title="Previous look in history"
+              title="Previous look in history (←)"
             >
               <ChevronLeft className="w-4 h-4" />
               <span className="hidden sm:inline">Prev</span>
@@ -294,15 +353,15 @@ export default function OutfitStudio({
 
             {/* Look Indicator Badge */}
             <div className="px-3.5 py-1.5 rounded-full bg-aura-ivory border border-aura-espresso/15 text-[11px] font-mono tracking-widest text-aura-espresso font-semibold">
-              Look {history.length > 0 ? historyIndex + 1 : 1} of {Math.max(history.length, 1)}
+              Look {state.history.length > 0 ? state.activeIndex + 1 : 1} of {Math.max(state.history.length, 1)}
             </div>
 
-            {/* Next Look */}
+            {/* Next Look (→) */}
             <button
               onClick={handleNextLook}
-              disabled={historyIndex >= history.length - 1 || loading}
+              disabled={state.activeIndex >= state.history.length - 1 || state.isGenerating}
               className="p-2 sm:px-3 sm:py-2 bg-aura-cream hover:bg-aura-taupe/30 active:bg-aura-taupe/50 disabled:opacity-30 disabled:cursor-not-allowed text-aura-espresso rounded-full text-xs font-medium uppercase tracking-wider transition-all flex items-center gap-1"
-              title="Next look in history"
+              title="Next look in history (→)"
             >
               <span className="hidden sm:inline">Next</span>
               <ChevronRight className="w-4 h-4" />
@@ -311,25 +370,25 @@ export default function OutfitStudio({
             {/* Resynthesize Diverse Alternative */}
             <button
               onClick={handleResynthesize}
-              disabled={loading}
-              className="flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-aura-cream hover:bg-aura-taupe/30 active:bg-aura-taupe/50 text-aura-espresso rounded-full text-xs font-medium uppercase tracking-wider transition-all border border-aura-espresso/10"
+              disabled={state.isGenerating}
+              className="flex items-center gap-2 px-4 sm:px-5 py-2.5 bg-aura-cream hover:bg-aura-taupe/30 active:bg-aura-taupe/50 disabled:opacity-50 disabled:cursor-not-allowed text-aura-espresso rounded-full text-xs font-medium uppercase tracking-wider transition-all border border-aura-espresso/10"
               title="Generate fresh, diverse coordinate pieces"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${state.isGenerating ? 'animate-spin' : ''}`} />
               <span>Resynthesize</span>
             </button>
 
             {/* Save Ensemble to Portfolio */}
             <button
               onClick={handleSaveOutfit}
-              disabled={isSaved || saving || loading}
+              disabled={state.isSaved || saving || state.isGenerating || !currentLook}
               className={`flex items-center gap-2 px-5 sm:px-6 py-2.5 rounded-full text-xs font-medium uppercase tracking-[0.18em] transition-all shadow-aura-subtle ${
-                isSaved
+                state.isSaved
                   ? 'bg-aura-olive text-white cursor-default'
-                  : 'bg-aura-espresso hover:bg-aura-dark active:scale-[0.98] text-aura-ivory'
+                  : 'bg-aura-espresso hover:bg-aura-dark active:scale-[0.98] text-aura-ivory disabled:opacity-50'
               }`}
             >
-              {isSaved ? (
+              {state.isSaved ? (
                 <>
                   <CheckCircle2 className="w-4 h-4 text-aura-champagne" />
                   <span>Ensemble Saved</span>
@@ -349,7 +408,7 @@ export default function OutfitStudio({
           <div>
             <span className="text-[10px] font-mono uppercase tracking-widest text-aura-muted block font-medium">Color Harmony</span>
             <p className="text-xl font-serif font-semibold text-aura-espresso mt-0.5">
-              {outfitData?.overall_score ? Math.round(outfitData.overall_score * 100) : 94}% Balanced
+              {currentLook?.overall_score ? Math.round(currentLook.overall_score * 100) : 94}% Balanced
             </p>
           </div>
           <div>
@@ -359,13 +418,13 @@ export default function OutfitStudio({
           <div>
             <span className="text-[10px] font-mono uppercase tracking-widest text-aura-muted block font-medium">Wardrobe Pieces</span>
             <p className="text-xl font-serif font-semibold text-aura-espresso mt-0.5">
-              {Object.keys(slots).length + 1} Coordinated
+              {Object.keys(slots).length + (anchor ? 1 : 0)} Coordinated
             </p>
           </div>
           <div>
             <span className="text-[10px] font-mono uppercase tracking-widest text-aura-muted block font-medium">Look Status</span>
             <p className="text-xl font-serif font-semibold text-aura-espresso mt-0.5">
-              {history.length > 1 ? `Look #${historyIndex + 1}` : 'Curated Match'}
+              {state.history.length > 1 ? `Look #${state.activeIndex + 1}` : 'Curated Match'}
             </p>
           </div>
         </div>
@@ -491,7 +550,7 @@ export default function OutfitStudio({
             </span>
           </div>
 
-          {loading ? (
+          {state.isGenerating ? (
             <div className="bg-white rounded-3xl p-16 text-center border border-aura-espresso/8 text-aura-muted space-y-3">
               <RefreshCw className="w-8 h-8 animate-spin mx-auto text-aura-olive" />
               <p className="font-serif text-base text-aura-espresso">Curating complementary pieces & color harmony...</p>
@@ -555,7 +614,7 @@ export default function OutfitStudio({
                           }`}
                           title={isSlotLiked ? 'Remove from Wishlist' : 'Save to Wishlist'}
                         >
-                          <Heart className={`w-3 h-3 ${isSlotLiked ? 'fill-current' : 'stroke-[1.5]'}`} />
+                          <Heart className={`w-3.5 h-3.5 ${isSlotLiked ? 'fill-current' : 'stroke-[1.5]'}`} />
                         </button>
                       </div>
 
@@ -613,37 +672,23 @@ export default function OutfitStudio({
                         )}
                       </div>
                     </div>
-
-                    {/* Slot Action Buttons */}
-                    <div className="mt-4 pt-3 border-t border-aura-espresso/6 flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          if (onSelectAnchor) onSelectAnchor(item);
-                        }}
-                        className="flex-1 py-1.5 px-2 bg-aura-cream/80 hover:bg-aura-cream text-aura-espresso text-[11px] font-medium rounded-lg transition-colors text-center"
-                      >
-                        Make Anchor
-                      </button>
-                      <button
-                        onClick={() => onProductSelect && onProductSelect(item)}
-                        className="py-1.5 px-2 bg-aura-ivory hover:bg-aura-cream text-aura-muted hover:text-aura-espresso rounded-lg text-xs transition-colors"
-                        title="View details"
-                      >
-                        <Info className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
                   </div>
                 );
               })}
             </div>
           )}
 
-          {/* Editorial Note */}
-          <div className="p-5 rounded-2xl bg-aura-cream/60 border border-aura-espresso/8 text-aura-espresso text-xs leading-relaxed space-y-1">
-            <span className="font-serif font-bold text-sm block">Editorial Styling Note:</span>
-            <p className="text-aura-muted font-normal">
-              Outfits in AURA are synthesized using strict category slot constraints (Upper, Lower, Footwear, Accessories) and validated color harmony matrices derived from fashion design theory. Dresses and full-body garments isolate lower-body pieces to prevent conflicting silhouettes.
-            </p>
+          {/* Stylist Guidance & Harmony Insights */}
+          <div className="bg-aura-cream/50 rounded-2xl p-5 border border-aura-espresso/8 flex items-start gap-3.5">
+            <Info className="w-5 h-5 text-aura-olive shrink-0 mt-0.5" />
+            <div className="text-xs text-aura-espresso/80 space-y-1 font-normal leading-relaxed">
+              <p className="font-medium text-aura-espresso">
+                Harmonic Composition Formula
+              </p>
+              <p>
+                Outfits in AURA are synthesized using visual feature vectors, tone balancing, and category templates. Use <strong>Resynthesize</strong> to cycle through distinct compatible pieces while preserving your selected anchor piece, or navigate back and forth using <strong>Prev</strong> and <strong>Next</strong>.
+              </p>
+            </div>
           </div>
         </div>
       </div>

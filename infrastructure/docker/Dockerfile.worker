@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir -r requirements-services.txt
 COPY backend/common /app/backend/common
 COPY backend/workers /app/backend/workers
 
-CMD ["python", "-m", "backend.workers.main"]
+CMD ["python", "-u", "-m", "backend.workers.main"]
