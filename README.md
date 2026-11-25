@@ -184,6 +184,18 @@ Each downstream service is wrapped by the circuit breaker in [`backend/common/ci
 
 Every gateway request receives or preserves an `X-Request-ID`. Gateway console entries are structured JSON with timestamp, request ID, client identity, method, path, status, and latency.
 
+#### Health Check, Logs, and Metrics Reference
+
+| Capability | Location | Information available |
+| --- | --- | --- |
+| Aggregated health check | `GET /api/health` | Overall status plus the gateway, three services, PostgreSQL, Redis, and circuit-breaker state |
+| Gateway access logs | `docker compose logs -f api_gateway` | Timestamp, `X-Request-ID`, client identity, HTTP method, path, status, and response latency |
+| Worker trace logs | `docker compose logs -f worker_service` | Queue consumption, job ID, correlation ID, processing, completion, or failure lifecycle |
+| Runtime metrics | `GET /api/metrics` | Total requests, HTTP 200/429/500 counters, circuit-breaker trips, and p50/p95/p99 latency |
+| User activity audit | `GET /api/audit/interactions` | Timestamped user action, user ID, product, context, and session details |
+
+The documented live health check returned **HTTP 200 / HEALTHY**, with all three services, PostgreSQL, and Redis marked `UP` and all circuit breakers `CLOSED`. When a downstream dependency is unavailable, the gateway reports individual nodes as `DOWN` and the aggregate status as `DEGRADED` instead of masking the failure.
+
 The following observability surfaces are available:
 
 | Surface | What it shows |
@@ -206,7 +218,43 @@ python load_tests/live_gateway_scenarios.py `
 
 This runner sends requests through the running Docker gateway, verifies routing and health, compares cold and repeated cacheable requests, creates tagged success and failure jobs, drives a bounded concurrent rate-limit spike, and prints a JSON report. It is a classroom verification rather than a production-capacity test.
 
-The recorded live results, method, and limitations are in [SD_LOAD_TEST_REPORT.md](SD_LOAD_TEST_REPORT.md). The current evidence records 123 successful 2xx responses, 13 intentional 429 responses, and no 5xx responses during a 136-request concurrent spike; do not generalise those local results into a production SLA.
+#### Eight-Scenario Benchmark Matrix
+
+The System Architecture dashboard at [`/architecture`](http://localhost:3000/architecture) presents the following matrix for the eight required demonstration scenarios. It provides a compact view of the expected protected-system behaviour across normal traffic, spikes, cache use, failure handling, asynchronous processing, and recovery.
+
+| Test scenario | Requests | Throughput | Average latency | p95 / expected behaviour | Result |
+| --- | ---: | --- | --- | --- | --- |
+| 1. Normal traffic | 50 | 147.6 RPS | 6.77 ms | 7.76 ms | PASS |
+| 2. Traffic spike burst | 150 | 241.6 RPS | 4.14 ms | 7.40 ms | PASS |
+| 3. Token bucket limiter | 75 | Rate limited | 429 blocked | `Retry-After: 2s` | PASS |
+| 4. Cache cold warm-up | 21 | 150.7 RPS | 6.49 ms | 9.21 ms | PASS |
+| 5. Cache miss vs. hit | 45 | 62.7 RPS | 8.53 ms hit | 12.95 ms miss | PASS |
+| 6. Circuit-breaker fallback | 25 | 233.6 RPS | 4.28 ms | Immediate 503 fallback | PASS |
+| 7. Asynchronous worker queue | 10 | Queue jobs | 100% persisted | Asynchronous database acknowledgement | PASS |
+| 8. Recovery after spike | 25 | 124.9 RPS | 8.01 ms | Zero dropouts | PASS |
+
+The dashboard matrix is a scenario-oriented demonstration summary. Use the reproducible live-gateway measurements below and the linked report when presenting measured results.
+
+#### Reproducible Live Gateway Results
+
+The following results are from the reproducible **23 November 2026** live test against `http://localhost:8000`. Traffic passed through the running Docker gateway; these are bounded local observations, not a production-capacity SLA.
+
+| Scenario | Requests | Concurrency | Throughput | 2xx | 429 | 5xx | Average latency | p95 latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline product gateway traffic | 30 | 6 | 91.08 RPS | 30 | 0 | 0 | 64.14 ms | 98.72 ms |
+| Concurrent rate-limit traffic spike | 136 | 24 | 60.45 RPS | 123 | 13 | 0 | 376.78 ms | 744.46 ms |
+
+The 13 HTTP 429 responses in the spike were intentional protection by the Redis Lua token bucket. A request using the same client identity was accepted after the one-second refill interval, and no HTTP 5xx responses occurred during the spike.
+
+| Supporting verification | Recorded result |
+| --- | --- |
+| Cacheable product query, cold | 49.48 ms |
+| Mean of 12 repeated cacheable queries | 12.47 ms |
+| Observed cold-to-warm improvement | 3.97× |
+| Valid asynchronous job submission | HTTP 202 in 78.42 ms, then `completed` with a persisted result |
+| Invalid asynchronous job | Persisted as `failed` with the real unknown-anchor validation error |
+
+The full method, raw result interpretation, and limitations are in [SD_LOAD_TEST_REPORT.md](SD_LOAD_TEST_REPORT.md). Do not generalise these local values into a production SLA.
 
 ## Machine Learning Features
 
