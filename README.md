@@ -1,279 +1,284 @@
-# AURA — Intelligent Fashion Recommendation Platform
-### Production-Grade Machine Learning Pipeline &bull; Distributed Microservices &bull; Docker &bull; React + Vite Frontend
+# AURA — Distributed Fashion Recommendation Platform
 
----
+> **Software Development Assignment:** Docker, microservices, API gateway, PostgreSQL, Redis, asynchronous workers, resilience, and ML-powered recommendations.
 
-## 1. Executive Summary
+AURA is a containerised fashion-recommendation platform built to demonstrate the required Software Development modules through a realistic machine-learning application:
 
-**AURA** is a complete, end-to-end, testable fashion recommendation platform engineered using real transaction and visual data from the **H&M Kaggle Competition** (31.78M transactions, 105.5K articles, 105.1K catalog images) alongside structured product metadata from **Myntra** (526.5K products).
+1. Architecture, Docker Compose, API gateway, rate limiting, and health checks.
+2. PostgreSQL persistence, Redis caching, and asynchronous worker processing.
+3. Fault tolerance, live-gateway load testing, structured logs, metrics, and a final demonstration.
 
-Rather than a superficial demonstration, this system integrates:
-1. **A Complete Machine Learning Pipeline** across 10 standalone Jupyter Notebooks with temporal train/validation/test evaluation, MobileNetV2 visual embeddings, TF-IDF content extraction, Item-Item Collaborative Filtering, implicit matrix factorization, and an empirical outfit compatibility engine.
-2. **A Distributed Microservices Architecture** featuring a FastAPI Gateway with an atomic Redis Lua Token Bucket rate limiter (HTTP 429), Circuit Breaker fault tolerance, PostgreSQL relational persistence, and asynchronous worker queues.
-3. **A Luxury Editorial React 18 + Vite + Tailwind CSS Frontend** with size-aware shopping, interactive slot-coordinated outfit synthesis, instant similar-item exploration, and real-time observability telemetry.
-4. **Comprehensive Concurrency Load Testing** benchmarked across 8 real-world traffic scenarios and Locust integration.
-5. **Full Academic Project Compliance** satisfying all Stage 1 (Architecture & Gateway), Stage 2 (Persistence, Cache & Queue), and Stage 3 (Fault Tolerance & Load Testing) deliverables.
+The machine-learning recommendation experience provides the real application workload. It combines visual, text, popularity, preference, and outfit-compatibility signals, while the primary evaluation focus remains the distributed-system implementation.
 
----
+> Start with the [SD requirement matrix](SD_REQUIREMENT_COMPLIANCE_MATRIX.md), [SD test verification report](SD_TEST_VERIFICATION_REPORT.md), and [live-gateway load-test report](SD_LOAD_TEST_REPORT.md). They record the dated evidence, results, and limitations. Historical reports are retained for provenance and should not be presented as current benchmark proof.
 
-## 2. Project Documentation & Academic Artifacts
+## Assignment Requirements and Evidence
 
-| Document | Path | Focus |
-| :--- | :--- | :--- |
-| **Assignment Compliance Matrix** | [`docs/sd_assignment/requirement_compliance_matrix.md`](docs/sd_assignment/requirement_compliance_matrix.md) | Itemized proof for all 15 SD & ML assignment requirements (ALL PASS) |
-| **Viva Demonstration Runbook** | [`docs/viva/live_demo_runbook.md`](docs/viva/live_demo_runbook.md) | Step-by-step 12 live demonstrations with commands, expected output & talking points |
-| **Academic Load Testing Report** | [`reports/system_performance/academic_load_test_report.md`](reports/system_performance/academic_load_test_report.md) | 3-page academic report with empirical benchmarks, latency percentiles & queue dynamics |
-| **Machine Learning Workflow Audit** | [`docs/ml/ml_workflow_audit.md`](docs/ml/ml_workflow_audit.md) | Detailed audit of all 10 notebooks, datasets, feature engineering & offline validation |
-| **System Architecture Diagrams** | [`infrastructure/diagrams/`](infrastructure/diagrams/) | 5 formal Mermaid diagrams (System, Request Flow, Cache, Queue, Circuit Breaker) |
+| Assignment module | What AURA demonstrates | Main evidence |
+| --- | --- | --- |
+| **1. Architecture, Docker, and gateway** | Eight-service Compose deployment, a FastAPI reverse proxy, Redis Lua token bucket, HTTP 429 responses, and aggregated health | [`docker-compose.yml`](docker-compose.yml), [`backend/gateway/main.py`](backend/gateway/main.py), [architecture diagrams](infrastructure/diagrams/) |
+| **2. Persistence, cache, and worker** | PostgreSQL entities and migrations, Redis-backed cache keys, Redis-list jobs, and a separate worker that persists terminal job status | [`database/`](database/), [`backend/common/redis_cache.py`](backend/common/redis_cache.py), [`backend/workers/`](backend/workers/) |
+| **3. Resilience, load, and observability** | Circuit breakers, bounded traffic-spike verification through the real gateway, correlation IDs, JSON access logs, metrics, and activity audit trail | [`backend/common/circuit_breaker.py`](backend/common/circuit_breaker.py), [`load_tests/live_gateway_scenarios.py`](load_tests/live_gateway_scenarios.py), [`SD_LOAD_TEST_REPORT.md`](SD_LOAD_TEST_REPORT.md) |
 
----
-
-## 3. Distributed Architecture
+## System Architecture
 
 ```mermaid
-flowchart TD
-    Client["React 18 + Vite Frontend (Port 3000)<br/>• Luxury Editorial Styling<br/>• Size-Aware Shopping & Studio"]
-    
-    subgraph Gateway_Tier["API Gateway Tier (Port 8000)"]
-        GW["FastAPI API Gateway"]
-        RL["Atomic Redis Lua Token Bucket Limiter<br/>(Capacity 60, Refill 0.5/s -> HTTP 429)"]
-        CB["Circuit Breakers (State Machine)<br/>(5 failures -> OPEN -> Fallback)"]
-        Obs["Telemetry (X-Request-ID, /api/health, /metrics)"]
-        GW --> RL
-        GW --> CB
-        GW --> Obs
+flowchart LR
+    Browser[React frontend\nNginx :3000] --> Gateway[FastAPI gateway\n:8000]
+
+    subgraph Gateway controls
+        RateLimit[Redis Lua token bucket\n429 on excess traffic]
+        Breaker[Circuit breakers\nDownstream fast-fail]
+        Telemetry[X-Request-ID, JSON logs\nhealth and metrics]
     end
 
-    subgraph Cache_And_Broker["Distributed Cache & Queue Tier"]
-        Redis[("Redis 7-Alpine<br/>(Port 6379)<br/>• Token Bucket Lua Engine<br/>• Query Caching (TTL 300s)<br/>• Queue: queue:recommendation_tasks")]
-    end
+    Gateway --> RateLimit
+    Gateway --> Breaker
+    Gateway --> Telemetry
+    Gateway --> Product[Product service]
+    Gateway --> Recs[Recommendation service]
+    Gateway --> Users[User service]
+    Gateway --> Queue[Redis job queue]
 
-    subgraph Service_Tier["Microservice Tier"]
-        PS["Product Service (Port 8001)<br/>• Catalog Queries & Filters<br/>• Size Matrix & Stock Availability"]
-        RS["Recommendation Service (Port 8002)<br/>• MobileNetV2 Visual Embeddings (1280-d)<br/>• TF-IDF Text & Attributes Matrix<br/>• Outfit Slot Compatibility Engine"]
-        US["User Service (Port 8003)<br/>• Preference Profiles & History<br/>• Interaction Logging & Likes<br/>• Saved Outfit Ensembles"]
-    end
-
-    subgraph Storage_Tier["Relational Persistence Tier"]
-        PG[("PostgreSQL 15 (Port 5433 host / 5432 container)<br/>• users, products, interactions<br/>• saved_outfits, outfit_items<br/>• recommendation_jobs (Named Volume: postgres_data)")]
-    end
-
-    subgraph Worker_Tier["Asynchronous Processing"]
-        Worker["Background Worker Daemon<br/>• BLPOP from queue:recommendation_tasks<br/>• Heavy Multi-Slot Synthesis<br/>• Updates PG: pending -> processing -> completed"]
-    end
-
-    Client -->|REST API / JSON| GW
-    GW -->|Route /api/products| PS
-    GW -->|Route /api/recommendations| RS
-    GW -->|Route /api/users| US
-    GW -->|POST /api/jobs/recommendations| Redis
-    GW -.->|Check/Store Cache| Redis
-    PS --> PG
-    US --> PG
-    RS -.->|Cache Embeddings| Redis
-    Redis -->|BLPOP Task| Worker
-    Worker --> PG
-    Worker -.-> Redis
+    Product --> Postgres[(PostgreSQL 15)]
+    Recs --> Postgres
+    Users --> Postgres
+    Product --> Redis[(Redis 7)]
+    Recs --> Redis
+    Queue --> Redis
+    Worker[Separate worker] -->|BLPOP task| Redis
+    Worker --> Postgres
 ```
 
----
+Detailed topology, request, cache/database, asynchronous-worker, and circuit-breaker views are in [infrastructure/diagrams](infrastructure/diagrams/).
 
-## 4. Port Allocation & Containers
+## Services and Ports
 
-| Service | Container Name | Port | Description |
-| :--- | :--- | :--- | :--- |
-| **Frontend UI** | `fashion_frontend` | `3000` | React 18 + Vite + Tailwind CSS luxury editorial UI |
-| **API Gateway** | `fashion_api_gateway` | `8000` | Central reverse proxy, Token Bucket rate limiter, Circuit Breakers |
-| **Product Service** | `fashion_product_service` | `8001` | Catalog management, size systems, inventory, filtering |
-| **Recommendation Service** | `fashion_rec_service` | `8002` | MobileNetV2 visual vectors, TF-IDF, outfit slot harmony |
-| **User Service** | `fashion_user_service` | `8003` | User history, interactions, wishlist, saved ensembles |
-| **Worker Service** | `fashion_worker_service` | *internal* | Consumes Redis task queue (`BLPOP`), writes to PostgreSQL |
-| **PostgreSQL 15** | `fashion_postgres` | `5433` (host) / `5432` | Relational persistence, ACID transactions, named volume |
-| **Redis 7** | `fashion_redis` | `6379` | In-memory cache, atomic rate limiting, task queue broker |
+| Service | Container | Host access | Responsibility |
+| --- | --- | --- | --- |
+| Frontend | `fashion_frontend` | [localhost:3000](http://localhost:3000) | React single-page application served by Nginx |
+| API gateway | `fashion_api_gateway` | [localhost:8000](http://localhost:8000) | Routing, rate limiting, circuit breaking, health, metrics, tracing |
+| Product service | `fashion_product_service` | Internal | Catalog search, filters, category and size data |
+| Recommendation service | `fashion_rec_service` | Internal | Similar-item, outfit, and personalized recommendations |
+| User service | `fashion_user_service` | Internal | Interactions, favorites, saved outfits, audit records |
+| Worker | `fashion_worker_service` | Internal | Consumes asynchronous recommendation jobs |
+| PostgreSQL 15 | `fashion_postgres` | `localhost:5433` | Persistent application data |
+| Redis 7 | `fashion_redis` | `localhost:6380` by default | Cache, atomic limiter state, and task queue |
 
----
+Only the frontend, gateway, PostgreSQL, and Redis are exposed on the host. Product, recommendation, and user services remain on the Compose network, so application traffic reaches them through the gateway.
 
-## 3. Four Core Application Features
+## Quick Start
 
-### Feature A: Similar Clothing Recommendation
-- **Dual Visual & Text Retrieval**: Combines 1,280-dimensional L2-normalized feature embeddings from a pretrained **MobileNetV2** backbone with a **TF-IDF metadata matrix** over product descriptions, colors, and garment types.
-- **Sub-5ms Inference**: Fast cosine similarity ranking returning top-$k$ nearest catalog neighbors with confidence percentages.
-- **Selectable Algorithm Modes**: Hybrid (50% Visual + 50% Text), Pure Visual, or Pure Attribute/Text.
+### Prerequisites
 
-### Feature B: Complete Outfit Recommendation (Outfit Studio)
-- **Separate Compatibility Logic**: Distinct from item-to-item similarity. A blue shirt does not match another blue shirt; it coordinates with pants, shoes, and accessories.
-- **Category Slot Constraints**: Enforces distinct slot roles (`upper_body`, `lower_body`, `full_body`, `shoes`, `accessories`).
-- **Empirical Color Harmony**: Built from a curated harmonic contrast matrix (e.g., Dark Blue + White = 0.98, Black + Grey = 0.95, Neutral complements = 0.80).
-- **Basket Co-Purchase Lift**: Co-occurrence statistics from multi-item transaction baskets act as weak supervision.
-- **Average Synthesis Latency**: **0.99 ms** with instant save to user portfolio.
+- Docker Desktop with Compose v2
+- Node.js 20+ and npm (required because the frontend Docker image copies the built `frontend/dist` directory)
 
-### Feature C: User Preferences & Persistent Memory
-- **Persistent Relational DB**: All clicks, views, likes, and saved outfits are permanently recorded in PostgreSQL (`fashion_db`) with session identifiers and timestamps.
-- **Portfolio Management**: Users can build custom outfit ensembles, name them, and retrieve them on subsequent visits.
+### Start the stack
 
-### Feature D: Continuous Personalization
-- **Immediate Personalization**: Dynamically re-ranks catalog recommendations based on the user's most recent browsing and interaction affinity without requiring full model retraining.
-- **Asynchronous Worker Profiling**: Heavy recommendation synthesis and periodic profile updates are offloaded to background workers, returning an asynchronous `job_id` (HTTP 202) while updating job status from `pending` &rarr; `processing` &rarr; `completed`.
-
----
-
-## 4. Machine Learning Pipeline & Notebook Walkthrough
-
-All ML development was completed in standalone Jupyter Notebooks in `notebooks/`, executed end-to-end with verified outputs:
-
-| Notebook | Focus | Key Results & Validations |
-| :--- | :--- | :--- |
-| [`01_data_understanding.ipynb`](notebooks/01_data_understanding.ipynb) | Dataset schema, nulls, duplicates | Audited 526.5K Myntra records & 105.5K H&M articles. Verified 99.58% image match (105,100 files). |
-| [`02_data_cleaning_and_eda.ipynb`](notebooks/02_data_cleaning_and_eda.ipynb) | Price outliers, category balance | Verified 16-week window (2020-06-02 to 2020-09-22) preserves 4.47M transactions across 44,989 active items. |
-| [`03_feature_engineering.ipynb`](notebooks/03_feature_engineering.ipynb) | TF-IDF, slot mappings, temporal split | Clean temporal split: Weeks 1–14 Train (86.7 MB), Week 15 Val (5.2 MB), Week 16 Test (5.2 MB). |
-| [`04_content_based_recommendation.ipynb`](notebooks/04_content_based_recommendation.ipynb) | Metadata TF-IDF recommender | Mean latency: 22.47 ms, p95: 26.97 ms, 99.0% product group consistency. |
-| [`05_collaborative_filtering.ipynb`](notebooks/05_collaborative_filtering.ipynb) | Item-Item CF & SVD Matrix Factorization | Evaluated on Week 15 Val set. Item-Item CF achieved HitRate@12 of 4.92% and MAP@12 of 0.747%. |
-| [`06_image_based_recommendation.ipynb`](notebooks/06_image_based_recommendation.ipynb) | MobileNetV2 visual embeddings | 1,280-d normalized visual embeddings. Sub-5ms nearest-neighbor search (mean 3.01 ms). |
-| [`07_hybrid_recommendation.ipynb`](notebooks/07_hybrid_recommendation.ipynb) | Multi-channel candidate ensemble | Visual + TF-IDF + CF + Popularity with adaptive cold-start weights. |
-| [`08_outfit_compatibility.ipynb`](notebooks/08_outfit_compatibility.ipynb) | Slot constraints & color harmony | 4-slot coordinated ensemble (Upper, Lower, Shoes, Accessories). Synthesis latency 0.99 ms. |
-| [`09_model_evaluation.ipynb`](notebooks/09_model_evaluation.ipynb) | Master offline validation | **Hybrid wins**: 7.85% HitRate@12 (+25.8% over Popularity), 0.915% MAP@12, 76.5% catalog coverage. |
-| [`10_final_recommendation_engine.ipynb`](notebooks/10_final_recommendation_engine.ipynb) | Held-out Week 16 test evaluation | Final test HitRate@12: 7.62%, MAP@12: 0.892%. Serialized all production artifacts in `artifacts/`. |
-
----
-
-## 5. Distributed Systems & Reliability Engineering
-
-### Redis-Backed Token Bucket Rate Limiter
-- **Configuration**: Capacity = 60 tokens / minute, Refill Rate = 1 token / second.
-- **Behavior**: Permits bursts up to 20 requests. Upon depletion, immediately responds with **HTTP 429 Too Many Requests**, providing headers `Retry-After: 2` and `X-RateLimit-Remaining: 0`.
-
-### Circuit Breaker Fault Tolerance
-- **State Machine**: CLOSED &rarr; OPEN (trips upon 5 consecutive service failures) &rarr; HALF-OPEN (recovery test after 8.0s timeout).
-- **Graceful Fallback**: When downstream microservices fail or timeout, the gateway returns a cached fallback payload in **<0.5 ms** with HTTP 503 instead of cascading thread exhaustion.
-
-### Health & Observability Telemetry
-- **`/health`**: Deep multi-dependency health checking verifying Database connectivity, Redis broker ping, Gateway status, and individual Circuit Breaker states.
-- **`/metrics`**: Real-time throughput counters, HTTP status code distribution (200, 429, 500), and latency summary (p50, p95, p99).
-- **`X-Request-ID`**: Propagated across every inbound and outbound hop for end-to-end distributed tracing.
-
----
-
-## 6. Concurrent Load Testing Benchmark Results
-
-Benchmarked using concurrent Python / Locust clients across 8 realistic production scenarios:
-
-| Scenario | Inbound Load | Measured RPS | Avg Latency | p95 Latency / Behavior | Result |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Normal Volume** | 50 concurrent reqs | 147.6 RPS | 6.77 ms | 7.76 ms | **PASS (100% 200 OK)** |
-| **2. Traffic Spike Burst** | 150 concurrent reqs | 241.6 RPS | 4.14 ms | 7.40 ms | **PASS (Stable Throughput)** |
-| **3. Token Bucket Limiter** | 75 burst reqs | Rate Limited | 429 Blocked | `Retry-After: 2s` | **PASS (10 HTTP 429 caught)** |
-| **4. Cache Warm-Up** | 21 cold reqs | 150.7 RPS | 6.49 ms | 9.21 ms | **PASS (Auto-seeded to Redis)** |
-| **5. Cache Hit vs Miss** | 45 reqs (cold/hot) | 62.7 RPS | 8.53 ms (Hit) | 12.95 ms (Miss) | **PASS (34.1% Latency Reduction)** |
-| **6. Circuit Breaker Fallback** | 25 fail-injected reqs | 233.6 RPS | 4.28 ms | Instant 503 Fallback | **PASS (Circuit tripped to OPEN)** |
-| **7. Worker Queue Load** | 10 async jobs | Job Queue | 100% Persisted | Asynchronous DB Update | **PASS (All status -> COMPLETED)** |
-| **8. Recovery Post-Spike** | 25 normal reqs | 124.9 RPS | 8.01 ms | Zero dropouts | **PASS (100% Recovered)** |
-
-*Complete performance analysis available in [`reports/system_performance/load_test_report.md`](reports/system_performance/load_test_report.md).*
-
----
-
-## 7. How to Run the Project
-
-### Option A: Running with Docker Compose (Recommended)
-
-1. Ensure Docker Desktop is installed and running.
-2. In the project root, execute:
-   ```bash
-   docker compose up --build
-   ```
-3. Services will boot in sequence with health-check coordination:
-   - **Frontend UI**: [http://localhost:3000](http://localhost:3000)
-   - **API Gateway**: [http://localhost:8000](http://localhost:8000)
-   - **Gateway Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-   - **System Health**: [http://localhost:8000/health](http://localhost:8000/health)
-   - **System Metrics**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
-
----
-
-### Option B: Running Locally (Development Mode)
-
-#### 1. Setup Python Environment & Dependencies
-```bash
-# Verify Python 3.11+ is active
-pip install -r requirements.txt
+```powershell
+# From the repository root
+npm --prefix frontend ci
+npm --prefix frontend run build
+docker compose up -d --build
+docker compose ps
 ```
 
-#### 2. Seed Database
-```bash
-# Seeds 5,000 catalog items and demo users into SQLite/Postgres
-python database/seed/seed_data.py
+On a fresh PostgreSQL volume, `database/schema/schema.sql` creates the application schema. Use the versioned migrations when upgrading an existing database; see [Database and migrations](#database-and-migrations).
+
+### Open the application
+
+| Resource | URL |
+| --- | --- |
+| Shopping application | [http://localhost:3000](http://localhost:3000) |
+| System architecture, metrics, and activity logs | [http://localhost:3000/architecture](http://localhost:3000/architecture) |
+| Gateway OpenAPI / Swagger | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| Aggregated health | [http://localhost:8000/api/health](http://localhost:8000/api/health) |
+| Gateway metrics | [http://localhost:8000/api/metrics](http://localhost:8000/api/metrics) |
+| Recent user activity audit | [http://localhost:8000/api/audit/interactions](http://localhost:8000/api/audit/interactions) |
+
+If an older frontend remains open after a rebuild, use `Ctrl+F5` to refresh it.
+
+### Stop the stack
+
+```powershell
+docker compose down
 ```
 
-#### 3. Start Backend Microservices
-Run each service in a separate terminal:
-```bash
-# Terminal 1: Product Service
-uvicorn backend.services.product_service.main:app --host 0.0.0.0 --port 8001
+This preserves the named PostgreSQL and Redis volumes. Do not add `--volumes` unless the data is intentionally disposable.
 
-# Terminal 2: Recommendation Service
-uvicorn backend.services.recommendation_service.main:app --host 0.0.0.0 --port 8002
+## Assignment Implementation
 
-# Terminal 3: User Service
-uvicorn backend.services.user_service.main:app --host 0.0.0.0 --port 8003
+### Module 1 — Architecture, Docker Setup, and API Gateway
 
-# Terminal 4: Asynchronous Worker Daemon
-python -m backend.workers.main
+#### Compose and Routing
 
-# Terminal 5: API Gateway
-uvicorn backend.gateway.main:app --host 0.0.0.0 --port 8000
+[`docker-compose.yml`](docker-compose.yml) defines the shared environment: frontend, gateway, three domain services, worker, PostgreSQL, and Redis. The gateway in [`backend/gateway/main.py`](backend/gateway/main.py) receives public API traffic and forwards it to the appropriate internal service.
+
+Primary gateway routes include:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/products`, `/api/products/{id}`, `/api/categories`, `/api/sizes` | Product catalogue |
+| `GET` / `POST /api/recommendations/...` | Similar, personalised, and outfit recommendations |
+| `GET` / `POST` / `DELETE /api/users/...` | User history, favorites, and saved outfits |
+| `POST /api/interactions` | Persist a timestamped user action |
+| `POST /api/jobs/recommendations` | Submit a heavy job and receive `202 Accepted` plus a job ID |
+| `GET /api/jobs/{job_id}` | Poll persisted asynchronous job state |
+
+#### Rate Limiting
+
+The gateway obtains a client identity and calls the Redis Lua token-bucket implementation in [`backend/common/redis_cache.py`](backend/common/redis_cache.py). The script performs the read, refill, consume, and expiry update atomically in Redis. Requests that cannot obtain a token receive **HTTP 429**, `Retry-After: 2`, and `X-RateLimit-Remaining: 0`.
+
+The Compose defaults are a burst capacity of **120** tokens and a refill rate of **2.0 tokens/second**. Override `RATE_LIMIT_CAPACITY` and `RATE_LIMIT_REFILL_RATE` through the environment to tune a deployment; callers cannot increase their own allowance with a request header.
+
+#### Health Checks
+
+`GET /api/health` reports the gateway, product, recommendation, and user services, plus PostgreSQL, Redis, and circuit-breaker status. It reports `HEALTHY` only when the required dependencies are available; an unavailable dependency produces a degraded response rather than hiding the failure.
+
+### Module 2 — Data Persistence, Caching, and Asynchronous Workers
+
+#### Database and Migrations
+
+PostgreSQL stores users, products, user interactions, saved outfits, outfit items, and recommendation jobs. The schema lives in [`database/schema/schema.sql`](database/schema/schema.sql); versioned changes live in [`database/migrations`](database/migrations/). Docker keeps PostgreSQL data in the `postgres_data` named volume.
+
+For an existing database upgrade, install the Python dependencies and point the migration runner at the desired database explicitly:
+
+```powershell
+pip install -r requirements-services.txt
+$env:DATABASE_URL = 'postgresql://postgres:postgres@localhost:5433/fashion_db'
+python database/migrations/migrate.py --status
+python database/migrations/migrate.py
 ```
 
-#### 4. Run System Integration Tests
-```bash
-python backend/tests/test_system.py
+Review the migration status before applying it. The runner records applied files in `schema_migrations`.
+
+#### Redis Cache and Queue
+
+Redis is used for:
+
+- atomic rate-limit counters;
+- cache entries for product and recommendation lookups;
+- the `queue:recommendation_tasks` Redis list; and
+- completed-job cache entries for polling.
+
+The product and recommendation services use cache keys with TTLs to avoid repeat database or model work. Redis must be available to accept distributed asynchronous work; the system does not falsely treat a process-local fallback as a healthy distributed queue.
+
+#### Asynchronous Workflow
+
+1. The client submits `POST /api/jobs/recommendations`.
+2. The gateway creates a PostgreSQL job record with status `pending` and pushes its payload to Redis.
+3. The worker consumes the queue with `BLPOP`, conditionally claims the pending record, and changes it to `processing`.
+4. It persists either `completed` with a result or `failed` with an error message.
+5. The client polls `GET /api/jobs/{job_id}`.
+
+This demonstrates a real separate worker process. Its Redis-list delivery is at-least-once/best-effort, not exactly-once transactional delivery; see [Known limits](#known-limits).
+
+### Module 3 — Fault Tolerance, Load Testing, Metrics, and Logs
+
+#### Circuit Breakers
+
+Each downstream service is wrapped by the circuit breaker in [`backend/common/circuit_breaker.py`](backend/common/circuit_breaker.py). After five consecutive failures, it opens and the gateway returns a fast **503** fallback instead of repeatedly waiting for a failing service. After eight seconds it enters `HALF_OPEN` and requires successful probes before closing again.
+
+#### Structured Observability
+
+Every gateway request receives or preserves an `X-Request-ID`. Gateway console entries are structured JSON with timestamp, request ID, client identity, method, path, status, and latency.
+
+The following observability surfaces are available:
+
+| Surface | What it shows |
+| --- | --- |
+| `GET /api/metrics` | Process-lifetime request counters, 200/429/500 counts, breaker trips, and p50/p95/p99 latency summaries |
+| `GET /api/health` | Service, dependency, and circuit-breaker health |
+| `GET /api/audit/interactions` | Recent persisted user actions: timestamp, user, action, product, context, and session |
+| `/architecture` in the frontend | Metric cards plus the latest audit records in a readable operations dashboard |
+| `docker compose logs -f api_gateway user_service worker_service` | Correlated request and worker lifecycle logs |
+
+The activity endpoint is designed for the local evaluator/operations dashboard. A production deployment must protect audit data with appropriate administrator authorization.
+
+#### Run the Bounded Live Gateway Check
+
+```powershell
+python load_tests/live_gateway_scenarios.py `
+  --base-url http://localhost:8000 `
+  --rate-capacity 120
 ```
 
-#### 5. Start React + Vite Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+This runner sends requests through the running Docker gateway, verifies routing and health, compares cold and repeated cacheable requests, creates tagged success and failure jobs, drives a bounded concurrent rate-limit spike, and prints a JSON report. It is a classroom verification rather than a production-capacity test.
 
----
+The recorded live results, method, and limitations are in [SD_LOAD_TEST_REPORT.md](SD_LOAD_TEST_REPORT.md). The current evidence records 123 successful 2xx responses, 13 intentional 429 responses, and no 5xx responses during a 136-request concurrent spike; do not generalise those local results into a production SLA.
 
-## 8. Repository Structure
+## Machine Learning Features
 
+The ML capability is intentionally documented after the SD platform because it is the consumer of the platform features above.
+
+| Capability | Implementation |
+| --- | --- |
+| Similar-item recommendation | TF-IDF metadata similarity, optional MobileNetV2 visual embeddings, and hybrid scoring in [`backend/services/recommendation_service/main.py`](backend/services/recommendation_service/main.py) |
+| Outfit generation | Slot-aware candidate selection with gender/size filters and colour-harmony rules |
+| Personalisation | Recent user interactions and preference signals influence recommendation retrieval |
+| Heavy synthesis | A queued worker job can produce a multi-slot outfit without blocking the gateway request |
+| Reproducible analysis | Ten notebooks in [`notebooks/`](notebooks/) cover data understanding, preparation, feature engineering, recommenders, hybrid evaluation, outfit compatibility, and final evaluation |
+
+The recommendation service loads processed catalogue data from `data/processed` and model artifacts from `artifacts/` at startup. Dataset preparation, methodology, and evaluation context are documented in [the ML workflow audit](docs/ml/ml_workflow_audit.md) and [the model comparison report](reports/ml_evaluation/model_comparison_report.md).
+
+## Verification
+
+Run these after the Docker stack is healthy:
+
+```powershell
+# Backend resilience and outfit/history tests
+python -m pytest tests/backend/test_gateway_resilience.py tests/backend/test_outfit_studio_history.py -q
+
+# Frontend state-machine tests
+node --test tests/frontend/outfit_history_state_machine.test.js
+
+# Production frontend bundle
+npm --prefix frontend run build
+
+# Bounded live gateway verification
+python load_tests/live_gateway_scenarios.py --base-url http://localhost:8000 --rate-capacity 120
 ```
-├── artifacts/                           # Serialized production models & embeddings
-│   ├── embeddings/                      # MobileNetV2 1280-d image embeddings (hm_image_embeddings.npy)
-│   ├── metadata/                        # Recommender benchmarks and configs
-│   └── models/                          # TF-IDF sparse matrix, SVD factors, mappings
-├── backend/                             # Distributed Backend Microservices & Gateway
-│   ├── common/                          # Shared database, Redis cache, schemas, circuit breaker
-│   ├── gateway/                         # Central API Gateway (Rate limiting, routing, telemetry)
-│   ├── services/
-│   │   ├── product_service/             # Catalog search, filtering, slot mapping (Port 8001)
-│   │   ├── recommendation_service/      # Visual & NLP similarity, outfit engine (Port 8002)
-│   │   └── user_service/                # Interaction logging, favorites, outfits (Port 8003)
-│   ├── tests/                           # Distributed system integration tests
-│   └── workers/                         # Asynchronous heavy job processor & daemon
-├── data/
-│   ├── processed/                       # Cleaned parquet datasets & train/val/test splits
-│   └── raw/                             # Source dataset links
-├── database/
-│   ├── schema/                          # PostgreSQL / SQLite DDL schema
-│   └── seed/                            # 5,000 product catalog database seeder
-├── frontend/                            # React + Vite + Tailwind CSS Application
-│   ├── src/
-│   │   ├── components/                  # Click-first UI (Catalog, Studio, ForYou, Observability)
-│   │   ├── services/                    # API client layer communicating with Gateway
-│   │   ├── App.jsx                      # Main coordinated tab application
-│   │   └── main.jsx
-│   ├── index.html
-│   └── package.json
-├── infrastructure/
-│   └── docker/                          # Production Dockerfiles & Nginx reverse proxy
-├── load_tests/                          # 8-scenario concurrent load testing suite
-├── notebooks/                           # 10 Executed, documented Machine Learning notebooks
-├── reports/                             # Evaluation reports, dataset audit, and load test analysis
-├── docker-compose.yml                   # Complete multi-container orchestration
-├── requirements.txt                     # Pinned Python package dependencies
-└── README.md                            # Complete Project Master Documentation
+
+For a faculty-facing walkthrough, use [SD_LIVE_DEMO_GUIDE.md](SD_LIVE_DEMO_GUIDE.md). The detailed verification record is in [SD_TEST_VERIFICATION_REPORT.md](SD_TEST_VERIFICATION_REPORT.md).
+
+## Repository Structure
+
+```text
+backend/
+  common/                  Shared SQLAlchemy, Redis, schemas, circuit breaker
+  gateway/                 Public FastAPI gateway
+  services/                Product, recommendation, and user microservices
+  workers/                 Redis-queue consumer and job processing
+database/
+  schema/                  Fresh PostgreSQL schema
+  migrations/              Versioned database upgrades
+  seed/                    Development seed data
+frontend/                  React, Vite, Tailwind, and Nginx SPA
+infrastructure/
+  diagrams/                Architecture and data-flow Mermaid diagrams
+  docker/                  Dockerfiles and Nginx proxy configuration
+load_tests/                Bounded live verifier and Locust profile
+notebooks/                 ML workflow notebooks
+reports/                   ML and historical performance reports
+tests/                     Backend and frontend verification tests
 ```
+
+## Known Limitations
+
+- The Redis list queue is not an exactly-once, transactionally acknowledged queue. A crash after `BLPOP` can require operational recovery.
+- The documented load results are bounded local measurements for one gateway instance. They do not prove horizontal scale or production capacity.
+- A live Redis-outage exercise and multi-gateway deployment were not part of the recorded evidence.
+- Gateway counters are held in process memory and reset when the gateway restarts.
+- The audit-log interface displays persisted application interaction data. It is not a substitute for an authenticated production security-audit system.
+
+## Further Documentation
+
+| Document | Use it for |
+| --- | --- |
+| [SD requirement compliance matrix](SD_REQUIREMENT_COMPLIANCE_MATRIX.md) | Requirement-by-requirement status, evidence, and open gaps |
+| [SD test verification report](SD_TEST_VERIFICATION_REPORT.md) | Commands executed, fixes, and actual results |
+| [SD load-test report](SD_LOAD_TEST_REPORT.md) | Throughput, latency, rate-limit, cache, worker, and resilience observations |
+| [SD live demo guide](SD_LIVE_DEMO_GUIDE.md) | Demonstrating the assignment to an evaluator |
+| [ML workflow audit](docs/ml/ml_workflow_audit.md) | Dataset and notebook workflow evidence |
+| [System architecture diagram](infrastructure/diagrams/system_architecture.md) | High-level component topology |

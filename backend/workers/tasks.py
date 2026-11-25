@@ -9,8 +9,9 @@ import sys
 import time
 import json
 import uuid
-import threading
 from pathlib import Path
+
+from sqlalchemy import func
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,29 +21,44 @@ from backend.common.database import SessionLocal
 from backend.common.models import RecommendationJob, Product
 from backend.common.redis_cache import cache
 
+class TaskQueueUnavailable(RuntimeError):
+    """Raised when a distributed job cannot be safely handed to the worker queue."""
+
+
 def process_heavy_recommendation_task(job_id: str, user_id: str, payload: dict):
     """
     Simulates / executes heavy asynchronous recommendation synthesis (e.g. multi-slot outfit generation).
     Updates PostgreSQL job record from pending -> processing -> completed.
     """
     db = SessionLocal()
-    job = db.query(RecommendationJob).filter(RecommendationJob.job_id == job_id).first()
-    if not job:
+    # Claim only a pending job.  The conditional update prevents a queue delivery
+    # and the pending-job recovery scan from processing the same record twice.
+    claimed = (
+        db.query(RecommendationJob)
+        .filter(RecommendationJob.job_id == job_id, RecommendationJob.status == "pending")
+        .update({"status": "processing", "updated_at": func.now()}, synchronize_session=False)
+    )
+    db.commit()
+    if claimed != 1:
         db.close()
         return
 
     try:
-        # 1. Update state to processing
-        job.status = "processing"
-        db.commit()
-        print(f"[WORKER] Job {job_id}: status -> PROCESSING")
+        job = db.query(RecommendationJob).filter(RecommendationJob.job_id == job_id).first()
+        request_id = payload.get("request_id", "not-provided")
+        print(f"[WORKER] request_id={request_id} job={job_id}: status -> PROCESSING")
         
         # Simulate heavy ML work (e.g. cross-slot candidate scoring)
         time.sleep(1.5)
         
         # 2. Synthesize results
         anchor_id = payload.get("anchor_article_id", "0108775015")
+        anchor = db.query(Product).filter(Product.article_id == anchor_id).first()
+        if not anchor:
+            raise ValueError(f"anchor_article_id '{anchor_id}' does not exist")
         products = db.query(Product).filter(Product.has_image == True).limit(4).all()
+        if not products:
+            raise RuntimeError("No image-enabled products are available for synthesis")
         
         result_payload = {
             "anchor_id": anchor_id,
@@ -64,7 +80,7 @@ def process_heavy_recommendation_task(job_id: str, user_id: str, payload: dict):
         job.status = "completed"
         job.result = result_payload
         db.commit()
-        print(f"[WORKER] Job {job_id}: status -> COMPLETED (Persisted to DB)")
+        print(f"[WORKER] request_id={request_id} job={job_id}: status -> COMPLETED (Persisted to DB)")
         
         # Update cache as well
         cache.set_json(f"job:{job_id}", {
@@ -77,7 +93,7 @@ def process_heavy_recommendation_task(job_id: str, user_id: str, payload: dict):
         job.status = "failed"
         job.error_message = str(e)
         db.commit()
-        print(f"[WORKER] Job {job_id}: status -> FAILED ({e})")
+        print(f"[WORKER] job={job_id}: status -> FAILED ({e})")
     finally:
         db.close()
 
@@ -103,15 +119,27 @@ def submit_async_recommendation_job(user_id: str, job_type: str, payload: dict) 
         "user_id": user_id,
         "payload": payload
     }
+    # A process-local fallback queue cannot be consumed by the separate worker
+    # container, so reject instead of falsely claiming durable asynchronous work.
+    if not cache.is_connected:
+        failure_reason = "Redis task queue is unavailable; job was not enqueued."
+        db = SessionLocal()
+        db.query(RecommendationJob).filter(RecommendationJob.job_id == job_uuid).update(
+            {"status": "failed", "error_message": failure_reason}
+        )
+        db.commit()
+        db.close()
+        raise TaskQueueUnavailable("Redis task queue is unavailable")
+
     pushed = cache.push_queue("queue:recommendation_tasks", task_data)
     print(f"[GATEWAY TASK] Enqueued job {job_uuid} into Redis queue: {pushed}")
-
-    # 2. In standalone/local mode without separate daemon container, launch daemon thread
-    worker_thread = threading.Thread(
-        target=process_heavy_recommendation_task,
-        args=(job_uuid, user_id, payload),
-        daemon=True
-    )
-    worker_thread.start()
+    if not pushed:
+        db = SessionLocal()
+        db.query(RecommendationJob).filter(RecommendationJob.job_id == job_uuid).update(
+            {"status": "failed", "error_message": "Redis task enqueue operation failed."}
+        )
+        db.commit()
+        db.close()
+        raise TaskQueueUnavailable("Redis task enqueue operation failed")
     
     return job_uuid

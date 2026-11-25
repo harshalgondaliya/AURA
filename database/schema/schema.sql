@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS user_interactions (
     article_id VARCHAR(16) NOT NULL REFERENCES products(article_id) ON DELETE CASCADE,
     interaction_type VARCHAR(32) NOT NULL, -- view, like, save, click, dismiss, purchase
     session_id VARCHAR(64),
-    context VARCHAR(64) DEFAULT 'feed', -- feed, similar, outfit, search
+    context TEXT DEFAULT 'feed', -- JSON audit context such as source feature and selected options
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

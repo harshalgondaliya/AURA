@@ -3,7 +3,7 @@ backend/common/schemas.py
 Pydantic Data Validation Schemas for APIs and Microservices.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -70,6 +70,8 @@ class OutfitResponse(BaseModel):
     slots: Dict[str, OutfitSlotItem]
     overall_score: float = 0.95
     selected_sizes: Optional[Dict[str, str]] = None
+    exhausted: bool = False
+    message: Optional[str] = None
 
 
 # --- Interaction Schemas ---
@@ -78,7 +80,7 @@ class InteractionCreate(BaseModel):
     article_id: str
     interaction_type: str = Field(..., pattern="^(view|like|save|click|dismiss|purchase)$")
     session_id: Optional[str] = None
-    context: Optional[str] = "feed"
+    context: Optional[Union[str, Dict[str, Any]]] = "feed"
 
 class InteractionResponse(BaseModel):
     id: int

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Compass, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
@@ -107,6 +107,17 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   const [recentViewIds, setRecentViewIds] = useState([]);
   const [productLoading, setProductLoading] = useState(false);
 
+  // Synchronization refs to avoid stale closures and eliminate redundant network cascades
+  const anchorProductRef = useRef(anchorProduct);
+  useEffect(() => {
+    anchorProductRef.current = anchorProduct;
+  }, [anchorProduct]);
+
+  const selectedProductRef = useRef(selectedProduct);
+  useEffect(() => {
+    selectedProductRef.current = selectedProduct;
+  }, [selectedProduct]);
+
   // Persistent Gender Scope (defaults to 'all', can be 'women' or 'men')
   const [selectedGender, setSelectedGender] = useState(() => {
     return localStorage.getItem('aura_catalog_gender') || 'all';
@@ -117,6 +128,9 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
 
   // Async Product Loader for Direct Link / Refresh
   const loadProduct = useCallback(async (id) => {
+    if (selectedProductRef.current && selectedProductRef.current.article_id === id) {
+      return;
+    }
     setProductLoading(true);
     try {
       const prod = await fetchProductById(id);
@@ -132,6 +146,9 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
   }, [showToast]);
 
   const loadAnchor = useCallback(async (id) => {
+    if (anchorProductRef.current && anchorProductRef.current.article_id === id) {
+      return;
+    }
     try {
       const prod = await fetchProductById(id);
       setAnchorProduct(prod);
@@ -140,7 +157,7 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
     }
   }, []);
 
-  // Initial Route Sync on Mount
+  // Initial Route Sync on Mount (runs strictly once on initialization)
   useEffect(() => {
     const parsed = parseUrl();
     if (parsed.redirect) {
@@ -159,7 +176,8 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
       loadProduct(parsed.productId);
     }
     setActiveTab(parsed.tab);
-  }, [loadAnchor, loadProduct]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Browser Back / Forward Handling (window.onpopstate)
   useEffect(() => {
@@ -174,10 +192,10 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
       if (parsed.category) {
         setSelectedCategory(parsed.category);
       }
-      if (parsed.anchorId && (!anchorProduct || anchorProduct.article_id !== parsed.anchorId)) {
+      if (parsed.anchorId && (!anchorProductRef.current || anchorProductRef.current.article_id !== parsed.anchorId)) {
         loadAnchor(parsed.anchorId);
       }
-      if (parsed.productId && (!selectedProduct || selectedProduct.article_id !== parsed.productId)) {
+      if (parsed.productId && (!selectedProductRef.current || selectedProductRef.current.article_id !== parsed.productId)) {
         loadProduct(parsed.productId);
       }
       setActiveTab(parsed.tab);
@@ -185,7 +203,7 @@ function AppContent({ activeUser, setActiveUser, toast, setToast, showToast }) {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [selectedProduct, anchorProduct, loadAnchor, loadProduct]);
+  }, [loadAnchor, loadProduct]);
 
   const handleGenderChange = (gender) => {
     setSelectedGender(gender);
@@ -528,9 +546,9 @@ export default function App() {
   const [activeUser, setActiveUser] = useState('user_000001');
   const [toast, setToast] = useState(null);
 
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
-  };
+  }, []);
 
   return (
     <WishlistProvider activeUser={activeUser} onToast={showToast}>
